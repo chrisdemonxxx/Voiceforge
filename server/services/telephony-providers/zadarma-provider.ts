@@ -29,8 +29,9 @@ export class ZadarmaProvider {
       throw new Error('Zadarma provider requires apiKey and apiSecret');
     }
 
-    this.apiKey = creds.apiKey;
-    this.apiSecret = creds.apiSecret;
+    // Trim credentials to remove any accidental whitespace
+    this.apiKey = creds.apiKey.trim();
+    this.apiSecret = creds.apiSecret.trim();
   }
 
   /**
