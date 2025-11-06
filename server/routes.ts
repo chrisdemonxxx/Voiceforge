@@ -110,28 +110,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get voice library
+  app.get("/api/voice-library", async (req, res) => {
+    try {
+      // Import voice library from constants
+      const { VOICE_LIBRARY } = await import("../client/src/lib/constants.js");
+      res.json(VOICE_LIBRARY);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // TTS Endpoint (used by both dashboard and landing page demo)
   app.post("/api/tts", authenticateApiKey, async (req, res) => {
     try {
       const startTime = Date.now();
       const data = ttsRequestSchema.parse(req.body);
       
-      // Check if voice is a cloned voice ID
-      let voiceCharacteristics = null;
-      if (data.voice) {
+      // Prepare voice data for TTS service
+      let voiceData: any = {
+        voice: data.voice,
+      };
+      
+      // Check if voice is a cloned voice ID (UUID format)
+      if (data.voice && data.voice.includes("-") && data.voice.length > 20) {
         const clonedVoice = await storage.getClonedVoice(data.voice);
         if (clonedVoice) {
-          voiceCharacteristics = clonedVoice.voiceCharacteristics;
+          voiceData.voice_characteristics = clonedVoice.voiceCharacteristics;
         }
       }
       
-      // Call Python TTS service with formant synthesis
+      // Call Python TTS service
       const audioBuffer = await pythonBridge.callTTS({
         text: data.text,
         model: data.model,
-        voice: data.voice,
+        voice: voiceData.voice,
         speed: data.speed,
-        voice_characteristics: voiceCharacteristics,
+        voice_characteristics: voiceData.voice_characteristics,
       });
       
       const processingTime = Date.now() - startTime;
