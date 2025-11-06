@@ -101,7 +101,178 @@ export interface AudioJob {
   error?: string;
 }
 
-// WebSocket message types
+// Real-time WebSocket Protocol
+// For dual-channel architecture: /ws/audio (low-latency audio) and /ws/control (session management)
+
+// Client → Server Messages
+export const wsClientMessageSchema = z.discriminatedUnion("type", [
+  // Session initialization
+  z.object({
+    type: z.literal("init"),
+    eventId: z.string(),
+    config: z.object({
+      mode: z.enum(["voice", "text", "hybrid"]),
+      sttEnabled: z.boolean().default(true),
+      ttsEnabled: z.boolean().default(true),
+      agentEnabled: z.boolean().default(false),
+      model: TTSModel.default("chatterbox"),
+      voice: z.string().optional(),
+      language: z.string().default("en"),
+    }),
+  }),
+  
+  // Audio chunk (PCM16, 20ms frames)
+  z.object({
+    type: z.literal("audio_chunk"),
+    eventId: z.string(),
+    chunk: z.string(), // base64 encoded PCM16
+    timestamp: z.number(), // client timestamp for latency tracking
+  }),
+  
+  // Text input (alternative to voice)
+  z.object({
+    type: z.literal("text_input"),
+    eventId: z.string(),
+    text: z.string(),
+    timestamp: z.number(),
+  }),
+  
+  // Control messages
+  z.object({
+    type: z.literal("pause"),
+    eventId: z.string(),
+  }),
+  z.object({
+    type: z.literal("resume"),
+    eventId: z.string(),
+  }),
+  z.object({
+    type: z.literal("end"),
+    eventId: z.string(),
+  }),
+  
+  // Quality feedback
+  z.object({
+    type: z.literal("quality_feedback"),
+    eventId: z.string(),
+    category: z.enum(["stt_accuracy", "tts_quality", "latency", "overall"]),
+    score: z.number().min(1).max(5),
+    comment: z.string().optional(),
+  }),
+]);
+
+// Server → Client Messages
+export const wsServerMessageSchema = z.discriminatedUnion("type", [
+  // Session acknowledgment
+  z.object({
+    type: z.literal("ready"),
+    eventId: z.string(),
+    sessionId: z.string(),
+    serverTimestamp: z.number(),
+  }),
+  
+  // STT partial result (streaming)
+  z.object({
+    type: z.literal("stt_partial"),
+    eventId: z.string(),
+    text: z.string(),
+    confidence: z.number(),
+    timestamp: z.number(),
+  }),
+  
+  // STT final result
+  z.object({
+    type: z.literal("stt_final"),
+    eventId: z.string(),
+    text: z.string(),
+    confidence: z.number(),
+    language: z.string(),
+    duration: z.number(),
+    latency: z.object({
+      capture: z.number(),
+      network: z.number(),
+      processing: z.number(),
+      total: z.number(),
+    }),
+  }),
+  
+  // Agent processing
+  z.object({
+    type: z.literal("agent_thinking"),
+    eventId: z.string(),
+    status: z.string(),
+  }),
+  
+  // Agent response
+  z.object({
+    type: z.literal("agent_reply"),
+    eventId: z.string(),
+    text: z.string(),
+    timestamp: z.number(),
+  }),
+  
+  // TTS audio chunk (streaming)
+  z.object({
+    type: z.literal("tts_chunk"),
+    eventId: z.string(),
+    chunk: z.string(), // base64 encoded audio
+    sequence: z.number(),
+    done: z.boolean(),
+  }),
+  
+  // TTS complete
+  z.object({
+    type: z.literal("tts_complete"),
+    eventId: z.string(),
+    duration: z.number(),
+    latency: z.object({
+      processing: z.number(),
+      streaming: z.number(),
+      total: z.number(),
+    }),
+  }),
+  
+  // Real-time metrics
+  z.object({
+    type: z.literal("metrics"),
+    eventId: z.string(),
+    metrics: z.object({
+      sttLatency: z.number().optional(),
+      ttsLatency: z.number().optional(),
+      agentLatency: z.number().optional(),
+      endToEndLatency: z.number().optional(),
+      activeConnections: z.number(),
+      queueDepth: z.number(),
+    }),
+  }),
+  
+  // Error handling
+  z.object({
+    type: z.literal("error"),
+    eventId: z.string(),
+    code: z.string(),
+    message: z.string(),
+    recoverable: z.boolean(),
+  }),
+  
+  // Session ended
+  z.object({
+    type: z.literal("ended"),
+    eventId: z.string(),
+    reason: z.string(),
+    stats: z.object({
+      duration: z.number(),
+      messagesProcessed: z.number(),
+      avgLatency: z.number(),
+      errorCount: z.number(),
+    }),
+  }),
+]);
+
+export type WSClientMessage = z.infer<typeof wsClientMessageSchema>;
+export type WSServerMessage = z.infer<typeof wsServerMessageSchema>;
+
+// Legacy WebSocket message types (for backward compatibility)
 export const wsMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("tts_stream"),
@@ -121,3 +292,15 @@ export const wsMessageSchema = z.discriminatedUnion("type", [
 ]);
 
 export type WSMessage = z.infer<typeof wsMessageSchema>;
+
+// Real-time session state
+export interface RealTimeSession {
+  id: string;
+  apiKeyId: string;
+  mode: "voice" | "text" | "hybrid";
+  startedAt: Date;
+  endedAt?: Date;
+  messagesProcessed: number;
+  avgLatency: number;
+  errorCount: number;
+}

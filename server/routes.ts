@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { rateLimiter } from "./rate-limiter";
 import { pythonBridge } from "./python-bridge";
+import { RealTimeGateway } from "./realtime-gateway";
 import multer from "multer";
 import { z } from "zod";
 import {
@@ -236,7 +237,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // WebSocket Server for Real-time Streaming
+  // Real-Time Gateway for Voice AI Playground
+  const realTimeGateway = new RealTimeGateway(httpServer, "/ws/realtime");
+  
+  // Metrics endpoint for real-time gateway
+  app.get("/api/realtime/metrics", (req, res) => {
+    res.json(realTimeGateway.getMetrics());
+  });
+  
+  // WebSocket Server for Real-time Streaming (legacy)
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
   wss.on("connection", (ws: WebSocket) => {
