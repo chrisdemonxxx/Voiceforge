@@ -128,6 +128,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update API key (toggle active status)
+  app.patch("/api/keys/:id", async (req, res) => {
+    try {
+      const { active } = req.body;
+      
+      if (typeof active !== "boolean") {
+        return res.status(400).json({ error: "Active status must be a boolean" });
+      }
+      
+      const updatedKey = await storage.updateApiKey(req.params.id, { active });
+      if (!updatedKey) {
+        return res.status(404).json({ error: "API key not found" });
+      }
+      
+      res.json(updatedKey);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Get voice library
   app.get("/api/voice-library", async (req, res) => {
     try {

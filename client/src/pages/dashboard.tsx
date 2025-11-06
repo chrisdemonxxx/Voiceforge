@@ -77,17 +77,44 @@ export default function Dashboard() {
     };
   };
 
-  // Mock usage stats - will be replaced with real API calls
-  const stats: UsageStats = {
-    totalRequests: 12847,
-    successRate: 98.5,
-    avgLatency: 187,
-    requestsToday: 324,
-    ttsRequests: 8234,
-    sttRequests: 3421,
-    vadRequests: 892,
-    vllmRequests: 300,
-  };
+  // Fetch real usage stats from API
+  const { data: stats = {
+    totalRequests: 0,
+    successRate: 0,
+    avgLatency: 0,
+    requestsToday: 0,
+    ttsRequests: 0,
+    sttRequests: 0,
+    vadRequests: 0,
+    vllmRequests: 0,
+  }, isLoading: statsLoading } = useQuery<UsageStats>({
+    queryKey: ["/api/usage", apiKeys.length],
+    queryFn: async () => {
+      const authHeaders = getAuthHeaders();
+      if (!authHeaders) {
+        // Return default empty stats if no active key
+        return {
+          totalRequests: 0,
+          successRate: 0,
+          avgLatency: 0,
+          requestsToday: 0,
+          ttsRequests: 0,
+          sttRequests: 0,
+          vadRequests: 0,
+          vllmRequests: 0,
+        };
+      }
+      const response = await fetch("/api/usage", {
+        headers: authHeaders,
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch usage stats");
+      }
+      return response.json();
+    },
+    enabled: apiKeys.some(k => k.active), // Only fetch when there's an active key
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
 
   const handleGenerateTTS = async () => {
     if (!ttsText.trim()) {
@@ -203,6 +230,31 @@ export default function Dashboard() {
     },
   });
 
+  // Toggle API key active status mutation
+  const toggleApiKeyMutation = useMutation({
+    mutationFn: async ({ id, active }: { id: string; active: boolean }) => {
+      const response = await apiRequest("PATCH", `/api/keys/${id}`, { active });
+      return await response.json();
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/keys"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/usage", apiKeys.length] });
+      toast({
+        title: variables.active ? "API key activated" : "API key deactivated",
+        description: variables.active 
+          ? "This key is now active and will be used for API requests" 
+          : "This key has been deactivated",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error updating API key",
+        description: error.message || "Something went wrong",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleCopyKey = (key: string) => {
     navigator.clipboard.writeText(key);
     toast({
@@ -213,6 +265,10 @@ export default function Dashboard() {
 
   const handleDeleteKey = (id: string) => {
     deleteApiKeyMutation.mutate(id);
+  };
+
+  const handleToggleKey = (id: string, currentActive: boolean) => {
+    toggleApiKeyMutation.mutate({ id, active: !currentActive });
   };
 
   const handleCreateKey = () => {
@@ -461,6 +517,25 @@ export default function Dashboard() {
               Monitor your API usage and test voice models
             </p>
           </div>
+
+          {/* No Active Key Warning Banner */}
+          {apiKeys.length > 0 && !apiKeys.some(k => k.active) && (
+            <Card className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950" data-testid="banner-no-active-key">
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <Key className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5" />
+                  <div className="flex-1">
+                    <h3 className="font-medium text-yellow-900 dark:text-yellow-100">
+                      No Active API Key
+                    </h3>
+                    <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
+                      You have API keys but none are currently active. Please activate a key to use the API and view usage statistics.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Stats Cards */}
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -892,6 +967,15 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={key.active ? "secondary" : "default"}
+                        onClick={() => handleToggleKey(key.id, key.active)}
+                        disabled={toggleApiKeyMutation.isPending}
+                        data-testid={`button-toggle-key-${key.id}`}
+                      >
+                        {key.active ? "Deactivate" : "Activate"}
+                      </Button>
                       <Button
                         size="icon"
                         variant="ghost"
