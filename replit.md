@@ -38,8 +38,14 @@ The platform adopts a developer-centric aesthetic inspired by platforms like Str
 *   **Platform Features**: Includes API key management with usage tracking, real-time WebSocket streaming, usage analytics, rate limiting, authentication, and multi-format audio conversion.
 
 ### System Design Choices
-*   **Database Architecture**: PostgreSQL with Drizzle ORM ensures production-grade persistence for API keys, usage tracking, and rate limits, utilizing atomic SQL operations and Neon serverless for scalability.
-*   **Python ML Services Integration**: A robust worker pool architecture manages persistent Python processes to minimize cold start latency. This design uses multiprocessing for task distribution, health checks, and automatic worker restarts. Communication with Python services occurs via JSON over stdin/stdout. The system supports streaming STT with partial transcriptions, VAD, confidence scoring, and timestamp alignment, achieving 30-60ms latency per chunk. TTS services use formant synthesis and are integrated into the worker pool. The architecture is designed for seamless GPU model swap-in when infrastructure is available.
+*   **Database Architecture**: PostgreSQL with Drizzle ORM ensures production-grade persistence for API keys, usage tracking, and rate limits, utilizing atomic SQL operations and Neon serverless for scalability. The system auto-seeds default API keys on first startup to ensure immediate functionality.
+*   **Authentication System**: Database-backed API key management with Bearer token authentication on all protected routes. The dashboard fetches real API keys from the database and dynamically injects them into all authenticated requests (TTS, voice cloning, voice management). API keys are cryptographically generated with per-key rate limiting enforced at the middleware level.
+*   **Python ML Services Integration**: A unified worker pool architecture manages all ML services (STT, TTS, HF_TTS, VLLM) through persistent Python processes to minimize cold start latency. This design uses multiprocessing for task distribution, health checks, and automatic worker restarts. Communication with Python services occurs via JSON over stdin/stdout.
+    - **STT Workers** (2 processes): Streaming transcription with partial results, VAD, confidence scoring, and timestamp alignment, achieving 30-60ms latency per chunk
+    - **TTS Workers** (2 processes): Base model synthesis (Chatterbox, Higgs Audio V2, StyleTTS2) with formant-based voice generation
+    - **HF_TTS Workers** (2 processes): Hugging Face Inference API integration for indic-parler-tts and parler-tts-multilingual, handling both Indian and T1 country languages through a unified service wrapper
+    - **VLLM Workers** (1 process): Conversational AI with context management and streaming responses
+*   **Architecture Benefits**: The worker pool design provides consistent task queuing, priority handling, automatic failover, unified metrics collection, and health monitoring across all ML services. The architecture is designed for seamless GPU model swap-in when infrastructure is available.
 
 ## External Dependencies
 *   **Database**: PostgreSQL (Neon serverless)
