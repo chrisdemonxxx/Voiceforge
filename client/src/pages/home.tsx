@@ -127,10 +127,12 @@ export default function Home() {
                     <Play className="ml-2 h-4 w-4" />
                   </Button>
                 </Link>
-                <Button size="lg" variant="outline" className="text-base" data-testid="button-hero-view-docs">
-                  View Documentation
-                  <Code className="ml-2 h-4 w-4" />
-                </Button>
+                <Link href="/realtime">
+                  <Button size="lg" variant="outline" className="text-base" data-testid="button-hero-realtime-lab">
+                    Real-Time Testing
+                    <Zap className="ml-2 h-4 w-4" />
+                  </Button>
+                </Link>
               </div>
 
               <div className="flex items-center gap-8 pt-4 text-sm text-muted-foreground">
