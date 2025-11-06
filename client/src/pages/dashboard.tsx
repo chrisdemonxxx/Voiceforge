@@ -55,6 +55,12 @@ export default function Dashboard() {
   const [cloneModel, setCloneModel] = useState("chatterbox");
   const [cloneDescription, setCloneDescription] = useState("");
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
+  
+  // Synthetic voice state
+  const [syntheticGender, setSyntheticGender] = useState("female");
+  const [syntheticAge, setSyntheticAge] = useState("middle_aged");
+  const [syntheticAccent, setSyntheticAccent] = useState("");
+  const [syntheticTone, setSyntheticTone] = useState("");
 
   // API key creation state
   const [isKeyDialogOpen, setIsKeyDialogOpen] = useState(false);
@@ -294,7 +300,18 @@ export default function Dashboard() {
 
   // Voice cloning mutation
   const cloneVoiceMutation = useMutation({
-    mutationFn: async (data: { name: string; model: string; description?: string; file: File }) => {
+    mutationFn: async (data: { 
+      name: string; 
+      model: string; 
+      description?: string; 
+      file?: File;
+      cloningMode: "instant" | "professional" | "synthetic";
+      voiceDescription?: string;
+      age?: string;
+      gender?: string;
+      accent?: string;
+      tone?: string;
+    }) => {
       // Get the first active API key
       const activeKey = apiKeys.find(k => k.active);
       if (!activeKey) {
@@ -304,10 +321,27 @@ export default function Dashboard() {
       const formData = new FormData();
       formData.append("name", data.name);
       formData.append("model", data.model);
+      formData.append("cloningMode", data.cloningMode);
+      
       if (data.description) {
         formData.append("description", data.description);
       }
-      formData.append("reference", data.file);
+      
+      // Synthetic voice specific fields
+      if (data.cloningMode === "synthetic") {
+        if (data.voiceDescription) {
+          formData.append("voiceDescription", data.voiceDescription);
+        }
+        if (data.age) formData.append("age", data.age);
+        if (data.gender) formData.append("gender", data.gender);
+        if (data.accent) formData.append("accent", data.accent);
+        if (data.tone) formData.append("tone", data.tone);
+      } else {
+        // Audio file required for instant and professional modes
+        if (data.file) {
+          formData.append("reference", data.file);
+        }
+      }
 
       const response = await fetch("/api/clone-voice", {
         method: "POST",
@@ -325,9 +359,14 @@ export default function Dashboard() {
       return response.json();
     },
     onSuccess: (data) => {
+      const modeLabel = data.cloningMode === "instant" ? "Instant clone" : 
+                        data.cloningMode === "professional" ? "Professional clone" :
+                        "Synthetic voice";
       toast({
-        title: "Voice cloned successfully",
-        description: `${data.name} is ready to use`,
+        title: "Voice created successfully",
+        description: data.cloningMode === "professional" 
+          ? `${data.name} is processing. This will take 2-4 hours.`
+          : `${data.name} is ready to use (${modeLabel})`,
       });
       // Reset form
       setCloneName("");
@@ -345,7 +384,7 @@ export default function Dashboard() {
     },
   });
 
-  const handleCloneVoice = () => {
+  const handleCloneVoice = (mode: "instant" | "professional" | "synthetic") => {
     if (!cloneName.trim()) {
       toast({
         title: "Name required",
@@ -355,21 +394,46 @@ export default function Dashboard() {
       return;
     }
 
-    if (!referenceFile) {
-      toast({
-        title: "Reference audio required",
-        description: "Please upload a reference audio file",
-        variant: "destructive",
+    // Validate based on mode
+    if (mode === "synthetic") {
+      if (!cloneDescription.trim()) {
+        toast({
+          title: "Description required",
+          description: "Please provide a description for the synthetic voice",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      cloneVoiceMutation.mutate({
+        name: cloneName,
+        model: cloneModel,
+        cloningMode: "synthetic",
+        voiceDescription: cloneDescription,
+        age: syntheticAge,
+        gender: syntheticGender,
+        accent: syntheticAccent,
+        tone: syntheticTone,
       });
-      return;
-    }
+    } else {
+      // Instant or Professional mode
+      if (!referenceFile) {
+        toast({
+          title: "Reference audio required",
+          description: "Please upload a reference audio file",
+          variant: "destructive",
+        });
+        return;
+      }
 
-    cloneVoiceMutation.mutate({
-      name: cloneName,
-      model: cloneModel,
-      description: cloneDescription,
-      file: referenceFile,
-    });
+      cloneVoiceMutation.mutate({
+        name: cloneName,
+        model: cloneModel,
+        description: cloneDescription,
+        file: referenceFile,
+        cloningMode: mode,
+      });
+    }
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -727,77 +791,227 @@ export default function Dashboard() {
                   </div>
                 </TabsContent>
 
-                {/* Voice Cloning Tab */}
+                {/* Voice Cloning Tab - Three Modes */}
                 <TabsContent value="clone" className="space-y-6 mt-6">
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="clone-name">Voice Name</Label>
-                      <Input
-                        id="clone-name"
-                        placeholder="e.g., My Custom Voice"
-                        value={cloneName}
-                        onChange={(e) => setCloneName(e.target.value)}
-                        data-testid="input-clone-name"
-                      />
-                    </div>
+                  <div className="grid gap-6 md:grid-cols-3">
+                    {/* Instant Voice Clone */}
+                    <Card className="bg-card">
+                      <CardHeader className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Zap className="h-5 w-5 text-primary" />
+                          <CardTitle className="text-lg">Instant Clone</CardTitle>
+                        </div>
+                        <CardDescription>
+                          30s - 2min audio • Fast processing • Good quality
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="instant-name">Voice Name</Label>
+                          <Input
+                            id="instant-name"
+                            placeholder="My Voice"
+                            value={cloneName}
+                            onChange={(e) => setCloneName(e.target.value)}
+                            data-testid="input-instant-name"
+                          />
+                        </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="clone-description">Description (optional)</Label>
-                      <Input
-                        id="clone-description"
-                        placeholder="e.g., Professional male voice"
-                        value={cloneDescription}
-                        onChange={(e) => setCloneDescription(e.target.value)}
-                        data-testid="input-clone-description"
-                      />
-                    </div>
+                        <div className="space-y-2">
+                          <Label>Reference Audio (30s-2min)</Label>
+                          <div className="border-2 border-dashed border-border rounded-lg p-4 text-center">
+                            <Upload className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
+                            <p className="text-xs text-muted-foreground mb-2">
+                              {referenceFile ? referenceFile.name : "Upload audio"}
+                            </p>
+                            <input
+                              type="file"
+                              accept="audio/*"
+                              onChange={handleFileSelect}
+                              className="hidden"
+                              id="file-upload-instant"
+                            />
+                            <Button 
+                              size="sm"
+                              variant="outline" 
+                              onClick={() => document.getElementById("file-upload-instant")?.click()}
+                              data-testid="button-upload-instant"
+                            >
+                              {referenceFile ? "Change" : "Select"}
+                            </Button>
+                          </div>
+                        </div>
 
-                    <div className="space-y-2">
-                      <Label>Reference Audio (5+ seconds)</Label>
-                      <div className="border-2 border-dashed border-border rounded-lg p-6 text-center">
-                        <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                        <p className="text-sm text-muted-foreground mb-2">
-                          {referenceFile ? referenceFile.name : "Upload a clear 5-10 second audio sample"}
-                        </p>
-                        <input
-                          type="file"
-                          accept="audio/*"
-                          onChange={handleFileSelect}
-                          className="hidden"
-                          id="file-upload-clone"
-                        />
+                        <div className="space-y-2">
+                          <Label>Model</Label>
+                          <Select value={cloneModel} onValueChange={setCloneModel}>
+                            <SelectTrigger data-testid="select-instant-model">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="chatterbox">Chatterbox</SelectItem>
+                              <SelectItem value="higgs_audio_v2">Higgs Audio</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
                         <Button 
-                          className="mt-2" 
-                          variant="outline" 
-                          onClick={() => document.getElementById("file-upload-clone")?.click()}
-                          data-testid="button-upload-reference"
+                          className="w-full" 
+                          onClick={() => handleCloneVoice("instant")}
+                          disabled={cloneVoiceMutation.isPending}
+                          data-testid="button-create-instant"
                         >
-                          {referenceFile ? "Change File" : "Select File"}
+                          {cloneVoiceMutation.isPending ? "Cloning..." : "Create Clone"}
                         </Button>
-                      </div>
-                    </div>
+                      </CardContent>
+                    </Card>
 
-                    <div className="space-y-2">
-                      <Label>Model</Label>
-                      <Select value={cloneModel} onValueChange={setCloneModel}>
-                        <SelectTrigger data-testid="select-clone-model">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="chatterbox">Chatterbox</SelectItem>
-                          <SelectItem value="higgs_audio_v2">Higgs Audio V2</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {/* Professional Voice Clone */}
+                    <Card className="bg-card">
+                      <CardHeader className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-5 w-5 text-primary" />
+                          <CardTitle className="text-lg">Professional Clone</CardTitle>
+                        </div>
+                        <CardDescription>
+                          30+ min audio • 2-4h processing • Best quality
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="pro-name">Voice Name</Label>
+                          <Input
+                            id="pro-name"
+                            placeholder="Pro Voice"
+                            value={cloneName}
+                            onChange={(e) => setCloneName(e.target.value)}
+                            data-testid="input-pro-name"
+                          />
+                        </div>
 
-                    <Button 
-                      className="w-full" 
-                      onClick={handleCloneVoice}
-                      disabled={cloneVoiceMutation.isPending}
-                      data-testid="button-create-voice"
-                    >
-                      {cloneVoiceMutation.isPending ? "Cloning Voice..." : "Create Voice Clone"}
-                    </Button>
+                        <div className="space-y-2">
+                          <Label>Reference Audio (30+ min)</Label>
+                          <div className="border-2 border-dashed border-border rounded-lg p-4 text-center">
+                            <Upload className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
+                            <p className="text-xs text-muted-foreground mb-2">
+                              {referenceFile ? referenceFile.name : "Upload long audio"}
+                            </p>
+                            <input
+                              type="file"
+                              accept="audio/*"
+                              onChange={handleFileSelect}
+                              className="hidden"
+                              id="file-upload-pro"
+                            />
+                            <Button 
+                              size="sm"
+                              variant="outline" 
+                              onClick={() => document.getElementById("file-upload-pro")?.click()}
+                              data-testid="button-upload-pro"
+                            >
+                              {referenceFile ? "Change" : "Select"}
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Model</Label>
+                          <Select value={cloneModel} onValueChange={setCloneModel}>
+                            <SelectTrigger data-testid="select-pro-model">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="chatterbox">Chatterbox</SelectItem>
+                              <SelectItem value="higgs_audio_v2">Higgs Audio</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <Button 
+                          className="w-full" 
+                          onClick={() => handleCloneVoice("professional")}
+                          disabled={cloneVoiceMutation.isPending}
+                          data-testid="button-create-pro"
+                        >
+                          {cloneVoiceMutation.isPending ? "Starting..." : "Start Processing"}
+                        </Button>
+                      </CardContent>
+                    </Card>
+
+                    {/* Voice Design (Synthetic) */}
+                    <Card className="bg-card">
+                      <CardHeader className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Mic2 className="h-5 w-5 text-primary" />
+                          <CardTitle className="text-lg">Voice Design</CardTitle>
+                        </div>
+                        <CardDescription>
+                          No audio needed • AI-generated • Instant
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="synthetic-name">Voice Name</Label>
+                          <Input
+                            id="synthetic-name"
+                            placeholder="AI Voice"
+                            value={cloneName}
+                            onChange={(e) => setCloneName(e.target.value)}
+                            data-testid="input-synthetic-name"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="voice-description">Voice Description</Label>
+                          <Textarea
+                            id="voice-description"
+                            placeholder="e.g., Warm, professional female voice with slight British accent"
+                            value={cloneDescription}
+                            onChange={(e) => setCloneDescription(e.target.value)}
+                            className="min-h-[80px] resize-none"
+                            data-testid="input-voice-description"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-2">
+                            <Label className="text-xs">Gender</Label>
+                            <Select value={syntheticGender} onValueChange={setSyntheticGender}>
+                              <SelectTrigger className="h-8" data-testid="select-gender">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="male">Male</SelectItem>
+                                <SelectItem value="female">Female</SelectItem>
+                                <SelectItem value="neutral">Neutral</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-xs">Age</Label>
+                            <Select value={syntheticAge} onValueChange={setSyntheticAge}>
+                              <SelectTrigger className="h-8" data-testid="select-age">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="young">Young</SelectItem>
+                                <SelectItem value="middle_aged">Middle Aged</SelectItem>
+                                <SelectItem value="old">Old</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        <Button 
+                          className="w-full" 
+                          onClick={() => handleCloneVoice("synthetic")}
+                          disabled={cloneVoiceMutation.isPending}
+                          data-testid="button-create-synthetic"
+                        >
+                          {cloneVoiceMutation.isPending ? "Generating..." : "Generate Voice"}
+                        </Button>
+                      </CardContent>
+                    </Card>
                   </div>
                 </TabsContent>
               </Tabs>
@@ -830,20 +1044,48 @@ export default function Dashboard() {
                       data-testid={`voice-${voice.id}`}
                     >
                       <div className="space-y-1 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium text-foreground">{voice.name}</p>
+                          
+                          {/* Cloning Mode Badge */}
+                          {voice.cloningMode && (
+                            <Badge variant="outline" className="gap-1">
+                              {voice.cloningMode === "instant" && <><Zap className="h-3 w-3" /> Instant</>}
+                              {voice.cloningMode === "professional" && <><Clock className="h-3 w-3" /> Pro</>}
+                              {voice.cloningMode === "synthetic" && <><Mic2 className="h-3 w-3" /> Synthetic</>}
+                            </Badge>
+                          )}
+                          
+                          {/* Model Badge */}
                           <Badge variant="secondary">
-                            {voice.model === "chatterbox" ? "Chatterbox" : "Higgs Audio V2"}
+                            {voice.model === "chatterbox" ? "Chatterbox" : "Higgs Audio"}
                           </Badge>
-                          <Badge 
-                            variant={voice.status === "ready" ? "default" : "secondary"}
-                            className={voice.status === "ready" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" : ""}
-                          >
-                            {voice.status}
-                          </Badge>
+                          
+                          {/* Processing Status Badge */}
+                          {voice.processingStatus && (
+                            <Badge 
+                              variant={voice.processingStatus === "completed" ? "default" : "secondary"}
+                              className={
+                                voice.processingStatus === "completed" 
+                                  ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" 
+                                  : voice.processingStatus === "processing"
+                                  ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                                  : voice.processingStatus === "failed"
+                                  ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                  : ""
+                              }
+                            >
+                              {voice.processingStatus === "completed" && <CheckCircle className="h-3 w-3 mr-1 inline" />}
+                              {voice.processingStatus === "processing" && <Clock className="h-3 w-3 mr-1 inline" />}
+                              {voice.processingStatus}
+                            </Badge>
+                          )}
                         </div>
                         {voice.description && (
                           <p className="text-sm text-muted-foreground">{voice.description}</p>
+                        )}
+                        {voice.voiceDescription && (
+                          <p className="text-sm text-muted-foreground italic">"{voice.voiceDescription}"</p>
                         )}
                         <div className="text-xs text-muted-foreground">
                           Created {new Date(voice.createdAt).toLocaleDateString()}

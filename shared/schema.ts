@@ -25,6 +25,14 @@ export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
 export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 export type ApiKey = typeof apiKeys.$inferSelect;
 
+// Cloning Mode enum
+export const CloningMode = z.enum(["instant", "professional", "synthetic"]);
+export type CloningModeType = z.infer<typeof CloningMode>;
+
+// Processing Status enum
+export const ProcessingStatus = z.enum(["pending", "processing", "completed", "failed"]);
+export type ProcessingStatusType = z.infer<typeof ProcessingStatus>;
+
 // Cloned Voices table
 export const clonedVoices = pgTable("cloned_voices", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -32,19 +40,130 @@ export const clonedVoices = pgTable("cloned_voices", {
   name: text("name").notNull(),
   model: text("model").notNull(), // chatterbox or higgs_audio_v2
   description: text("description"),
-  referenceAudioPath: text("reference_audio_path").notNull(),
+  cloningMode: text("cloning_mode").notNull().default("instant"), // instant, professional, synthetic
+  processingStatus: text("processing_status").notNull().default("pending"), // pending, processing, completed, failed
+  processingStartedAt: timestamp("processing_started_at"),
+  processingCompletedAt: timestamp("processing_completed_at"),
+  voiceDescription: text("voice_description"), // for synthetic voices - description of desired voice
+  referenceAudioPath: text("reference_audio_path"), // null for synthetic voices
   voiceCharacteristics: jsonb("voice_characteristics"), // stores formant values, pitch, etc.
-  status: text("status").notNull().default("ready"), // processing, ready, failed
+  status: text("status").notNull().default("ready"), // processing, ready, failed (kept for backward compatibility)
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const insertClonedVoiceSchema = createInsertSchema(clonedVoices).omit({
   id: true,
   createdAt: true,
+  processingStartedAt: true,
+  processingCompletedAt: true,
 });
 
 export type InsertClonedVoice = z.infer<typeof insertClonedVoiceSchema>;
 export type ClonedVoice = typeof clonedVoices.$inferSelect;
+
+// Agent Flows - Visual flow builder for conversational AI agents
+export const agentFlows = pgTable("agent_flows", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  apiKeyId: varchar("api_key_id").notNull().references(() => apiKeys.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  configuration: jsonb("configuration"), // flow-level settings like variables, webhooks, etc.
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertAgentFlowSchema = createInsertSchema(agentFlows).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAgentFlow = z.infer<typeof insertAgentFlowSchema>;
+export type AgentFlow = typeof agentFlows.$inferSelect;
+
+// Flow Node Types enum
+export const FlowNodeType = z.enum([
+  "subagent",         // Modify agent behavior at conversation points
+  "tool",             // Execute specific actions
+  "agent_transfer",   // Hand off to different AI agents
+  "phone_transfer",   // Transfer to human via phone
+  "end_call",         // Terminate conversation
+]);
+export type FlowNodeTypeType = z.infer<typeof FlowNodeType>;
+
+// Flow Nodes - Individual nodes within an agent flow
+export const flowNodes = pgTable("flow_nodes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  flowId: varchar("flow_id").notNull().references(() => agentFlows.id, { onDelete: "cascade" }),
+  type: text("type").notNull(), // subagent, tool, agent_transfer, phone_transfer, end_call
+  position: jsonb("position").notNull(), // {x: number, y: number}
+  data: jsonb("data").notNull(), // Node-specific configuration
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertFlowNodeSchema = createInsertSchema(flowNodes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertFlowNode = z.infer<typeof insertFlowNodeSchema>;
+export type FlowNode = typeof flowNodes.$inferSelect;
+
+// Flow Edges - Connections between nodes in a flow
+export const flowEdges = pgTable("flow_edges", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  flowId: varchar("flow_id").notNull().references(() => agentFlows.id, { onDelete: "cascade" }),
+  sourceNodeId: varchar("source_node_id").notNull().references(() => flowNodes.id, { onDelete: "cascade" }),
+  targetNodeId: varchar("target_node_id").notNull().references(() => flowNodes.id, { onDelete: "cascade" }),
+  label: text("label"), // Optional label for the edge (e.g., condition)
+  type: text("type").default("default"), // default, conditional, etc.
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertFlowEdgeSchema = createInsertSchema(flowEdges).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertFlowEdge = z.infer<typeof insertFlowEdgeSchema>;
+export type FlowEdge = typeof flowEdges.$inferSelect;
+
+// Node data structure schemas for type safety
+export const subagentNodeDataSchema = z.object({
+  systemPrompt: z.string(),
+  tools: z.array(z.string()).optional(),
+  knowledgeBase: z.string().optional(),
+  turnEagerness: z.number().min(0).max(1).default(0.5),
+  timeout: z.number().optional(),
+});
+
+export const toolNodeDataSchema = z.object({
+  toolName: z.string(),
+  parameters: z.record(z.any()).optional(),
+  onSuccess: z.string().optional(), // Node ID to transition to on success
+  onFailure: z.string().optional(), // Node ID to transition to on failure
+});
+
+export const agentTransferNodeDataSchema = z.object({
+  targetAgentId: z.string(),
+  context: z.string().optional(),
+});
+
+export const phoneTransferNodeDataSchema = z.object({
+  phoneNumber: z.string(),
+  message: z.string().optional(),
+});
+
+export const endCallNodeDataSchema = z.object({
+  message: z.string().optional(),
+  saveTranscript: z.boolean().default(true),
+});
+
+export type SubagentNodeData = z.infer<typeof subagentNodeDataSchema>;
+export type ToolNodeData = z.infer<typeof toolNodeDataSchema>;
+export type AgentTransferNodeData = z.infer<typeof agentTransferNodeDataSchema>;
+export type PhoneTransferNodeData = z.infer<typeof phoneTransferNodeDataSchema>;
+export type EndCallNodeData = z.infer<typeof endCallNodeDataSchema>;
 
 // TTS Models enum
 export const TTSModel = z.enum(["indic-parler-tts", "parler-tts-multilingual", "chatterbox", "higgs_audio_v2", "styletts2"]);
@@ -77,13 +196,43 @@ export const sttRequestSchema = z.object({
 
 export type STTRequest = z.infer<typeof sttRequestSchema>;
 
-// Voice Clone Request schema
-export const voiceCloneRequestSchema = z.object({
+// Voice Clone Request schemas - different for each mode
+export const instantVoiceCloneRequestSchema = z.object({
   name: z.string().min(1).max(100),
   model: z.enum(["chatterbox", "higgs_audio_v2"]),
   description: z.string().optional(),
+  cloningMode: z.literal("instant"),
 });
 
+export const professionalVoiceCloneRequestSchema = z.object({
+  name: z.string().min(1).max(100),
+  model: z.enum(["chatterbox", "higgs_audio_v2"]),
+  description: z.string().optional(),
+  cloningMode: z.literal("professional"),
+  captchaVerified: z.boolean().default(false),
+});
+
+export const syntheticVoiceRequestSchema = z.object({
+  name: z.string().min(1).max(100),
+  cloningMode: z.literal("synthetic"),
+  voiceDescription: z.string().min(10).max(500), // Description of the desired voice
+  age: z.enum(["young", "middle_aged", "old"]).optional(),
+  gender: z.enum(["male", "female", "neutral"]).optional(),
+  accent: z.string().optional(), // e.g., "american", "british", "indian"
+  tone: z.string().optional(), // e.g., "warm", "authoritative", "friendly"
+  model: z.enum(["chatterbox", "higgs_audio_v2"]).default("chatterbox"),
+});
+
+// Union of all voice clone request schemas
+export const voiceCloneRequestSchema = z.discriminatedUnion("cloningMode", [
+  instantVoiceCloneRequestSchema,
+  professionalVoiceCloneRequestSchema,
+  syntheticVoiceRequestSchema,
+]);
+
+export type InstantVoiceCloneRequest = z.infer<typeof instantVoiceCloneRequestSchema>;
+export type ProfessionalVoiceCloneRequest = z.infer<typeof professionalVoiceCloneRequestSchema>;
+export type SyntheticVoiceRequest = z.infer<typeof syntheticVoiceRequestSchema>;
 export type VoiceCloneRequest = z.infer<typeof voiceCloneRequestSchema>;
 
 // Usage Stats interface

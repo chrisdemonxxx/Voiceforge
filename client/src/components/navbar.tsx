@@ -18,6 +18,7 @@ export function Navbar() {
 
   const navLinks = [
     { href: "/", label: "Home" },
+    { href: "/voice-library", label: "Voice Library" },
     { href: "/dashboard", label: "Dashboard" },
     { href: "#features", label: "Features" },
     { href: "#api", label: "API" },
