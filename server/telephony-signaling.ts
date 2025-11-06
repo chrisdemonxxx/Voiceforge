@@ -224,7 +224,7 @@ export class TelephonySignaling {
     // Update call record with WebSocket session metadata
     await storage.updateCall(callRecord.id, {
       metadata: {
-        ...callRecord.metadata,
+        ...(callRecord.metadata || {}),
         wsSessionId: sessionId,
         userAgent: "WebRTC Dialer",
       },
