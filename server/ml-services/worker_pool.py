@@ -65,7 +65,7 @@ class WorkerStats:
 class Worker:
     """Individual worker process"""
     
-    def __init__(self, worker_id: int, worker_type: WorkerType, task_queue: Queue, result_queue: Queue, shutdown_event: Event):
+    def __init__(self, worker_id: int, worker_type: WorkerType, task_queue: Any, result_queue: Any, shutdown_event: Any):
         self.worker_id = worker_id
         self.worker_type = worker_type
         self.task_queue = task_queue
