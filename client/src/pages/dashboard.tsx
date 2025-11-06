@@ -27,15 +27,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { AudioPlayer } from "@/components/audio-player";
 import { ModelCard } from "@/components/model-card";
+import { VoiceSelector } from "@/components/voice-selector";
 import { MODEL_INFO } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import type { UsageStats, ApiKey } from "@shared/schema";
+import type { Voice } from "@shared/voices";
 
 export default function Dashboard() {
   const { toast } = useToast();
-  const [selectedModel, setSelectedModel] = useState("chatterbox");
+  const [selectedModel, setSelectedModel] = useState("indic-parler-tts");
+  const [selectedVoice, setSelectedVoice] = useState<string | undefined>(undefined);
   const [ttsText, setTtsText] = useState("");
   const [generatedAudio, setGeneratedAudio] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
   
   // Voice cloning state
   const [cloneName, setCloneName] = useState("");
@@ -63,6 +67,7 @@ export default function Dashboard() {
       createdAt: new Date("2025-01-01"),
       usage: 8234,
       active: true,
+      rateLimit: 1000,
     },
     {
       id: "2",
@@ -71,23 +76,67 @@ export default function Dashboard() {
       createdAt: new Date("2025-01-15"),
       usage: 423,
       active: true,
+      rateLimit: 100,
     },
   ];
 
-  const handleGenerateTTS = () => {
+  const handleGenerateTTS = async () => {
+    if (!ttsText.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter text to synthesize",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    setGeneratedAudio(null);
+
     toast({
       title: "Generating speech...",
-      description: `Using ${MODEL_INFO[selectedModel].name}`,
+      description: `Using ${MODEL_INFO[selectedModel]?.name || selectedModel}`,
     });
-    
-    // Mock generation
-    setTimeout(() => {
-      setGeneratedAudio("/placeholder-audio.mp3");
+
+    try {
+      const response = await fetch("/api/tts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer vf_sk_demo_key_1",
+        },
+        body: JSON.stringify({
+          text: ttsText,
+          model: selectedModel,
+          voice: selectedVoice,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to generate speech");
+      }
+
+      // Get the audio blob and create a URL
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      setGeneratedAudio(audioUrl);
+
       toast({
         title: "Speech generated",
         description: "Your audio is ready to play",
       });
-    }, 1000);
+    } catch (error: any) {
+      console.error("TTS error:", error);
+      toast({
+        title: "Generation failed",
+        description: error.message || "Failed to generate speech",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleCopyKey = (key: string) => {
@@ -192,8 +241,13 @@ export default function Dashboard() {
   };
 
   // Fetch cloned voices
-  const { data: clonedVoices, isLoading: voicesLoading } = useQuery({
+  const { data: clonedVoices, isLoading: voicesLoading } = useQuery<any[]>({
     queryKey: ["/api/voices"],
+  });
+
+  // Fetch voice library for Indic Parler TTS
+  const { data: voiceLibrary, isLoading: voiceLibraryLoading, error: voiceLibraryError } = useQuery<Voice[]>({
+    queryKey: ["/api/voice-library"],
   });
 
   // Delete voice mutation
@@ -390,10 +444,28 @@ export default function Dashboard() {
                         key={model.id}
                         model={model}
                         selected={selectedModel === model.id}
-                        onSelect={() => setSelectedModel(model.id)}
+                        onSelect={() => {
+                          setSelectedModel(model.id);
+                          if (model.id !== "indic-parler-tts") {
+                            setSelectedVoice(undefined);
+                          }
+                        }}
                       />
                     ))}
                   </div>
+
+                  {selectedModel === "indic-parler-tts" && (
+                    <div className="space-y-2">
+                      <Label>Select Voice</Label>
+                      <VoiceSelector
+                        voices={voiceLibrary || []}
+                        selectedVoice={selectedVoice}
+                        onSelectVoice={setSelectedVoice}
+                        isLoading={voiceLibraryLoading}
+                        error={voiceLibraryError?.message}
+                      />
+                    </div>
+                  )}
 
                   <div className="flex gap-3">
                     <Select defaultValue="wav">
@@ -410,11 +482,11 @@ export default function Dashboard() {
 
                     <Button
                       onClick={handleGenerateTTS}
-                      disabled={!ttsText.trim()}
+                      disabled={!ttsText.trim() || isGenerating}
                       data-testid="button-generate-tts"
                     >
                       <Play className="mr-2 h-4 w-4" />
-                      Generate Speech
+                      {isGenerating ? "Generating..." : "Generate Speech"}
                     </Button>
                   </div>
 

@@ -113,8 +113,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get voice library
   app.get("/api/voice-library", async (req, res) => {
     try {
-      // Import voice library from constants
-      const { VOICE_LIBRARY } = await import("../client/src/lib/constants.js");
+      // Import voice library from shared module
+      const { VOICE_LIBRARY } = await import("@shared/voices");
       res.json(VOICE_LIBRARY);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -155,11 +155,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader("X-Processing-Time", `${processingTime}ms`);
       res.send(audioBuffer);
     } catch (error: any) {
+      console.error("[TTS] Error:", error);
+      
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: "Invalid input", details: error.errors });
-      } else {
-        res.status(500).json({ error: error.message });
+        return res.status(400).json({ 
+          error: "Invalid input", 
+          details: error.errors 
+        });
       }
+      
+      // Handle Hugging Face specific errors
+      if (error.message.includes("503") || error.message.includes("Model is loading")) {
+        return res.status(503).json({ 
+          error: "Model is loading. Please try again in a few seconds.",
+          retry_after: 10
+        });
+      }
+      
+      if (error.message.includes("HF API error") || error.message.includes("HF TTS")) {
+        return res.status(503).json({ 
+          error: "Hugging Face service temporarily unavailable. Please try again.",
+          service: "huggingface"
+        });
+      }
+      
+      // Worker pool errors
+      if (error.message.includes("Worker pool") || error.message.includes("worker")) {
+        return res.status(503).json({ 
+          error: "TTS service temporarily unavailable. Please try again.",
+          service: "worker_pool"
+        });
+      }
+      
+      // Generic error
+      res.status(500).json({ error: error.message || "Failed to generate speech" });
     }
   });
 
