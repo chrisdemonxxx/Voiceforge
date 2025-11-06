@@ -407,11 +407,55 @@ export class PythonBridge {
   }
   
   async callTTS(request: TTSRequest): Promise<Buffer> {
-    // If using Hugging Face Indic Parler TTS model, route to HF service
+    // Route based on model selection
     if (request.model === "indic-parler-tts") {
       return this.callHuggingFaceTTS(request);
     }
     
+    if (request.model === "parler-tts-multilingual") {
+      return this.callParlerTTSMultilingual(request);
+    }
+    
+    // Auto-detect model based on voice language if voice ID provided
+    if (request.voice) {
+      try {
+        const { VOICE_LIBRARY } = await import("@shared/voices");
+        const voice = VOICE_LIBRARY.find((v) => v.id === request.voice);
+        
+        if (voice) {
+          // Indian languages use indic-parler-tts
+          const indianLanguages = [
+            "Hindi", "Tamil", "Telugu", "Malayalam", "Bengali", "Urdu",
+            "Gujarati", "Kannada", "Marathi", "Punjabi", "Odia", "Assamese",
+            "Nepali", "Sindhi", "Kashmiri", "Sanskrit", "Manipuri", "Bodo",
+            "Dogri", "Konkani", "Maithili"
+          ];
+          
+          if (indianLanguages.includes(voice.language)) {
+            console.log(`[PythonBridge] Auto-routing ${voice.language} voice to indic-parler-tts`);
+            return this.callHuggingFaceTTS(request);
+          }
+          
+          // T1 country languages use parler-tts-multilingual
+          // These strings must match EXACTLY with voice.language in shared/voices.ts
+          const t1Languages = [
+            "English (USA)", "English (UK)", "English (Canada)", "English (Australia)",
+            "German", "French", "Spanish (Spain)", "Spanish (Mexico)",
+            "Italian", "Portuguese (Brazil)", "Portuguese (Portugal)",
+            "Dutch", "Polish", "Russian", "Japanese", "Korean", "Chinese (Mandarin)"
+          ];
+          
+          if (t1Languages.includes(voice.language)) {
+            console.log(`[PythonBridge] Auto-routing ${voice.language} voice to parler-tts-multilingual`);
+            return this.callParlerTTSMultilingual(request);
+          }
+        }
+      } catch (error) {
+        console.warn("[PythonBridge] Failed to auto-detect voice model, using default routing:", error);
+      }
+    }
+    
+    // Default: Use worker pool for base models (chatterbox, higgs_audio_v2, styletts2)
     if (!this.ttsPool) {
       // Fallback to spawn mode if pool not initialized
       return this.callTTSSpawn(request);
@@ -513,6 +557,88 @@ export class PythonBridge {
       };
 
       python.stdin.write(JSON.stringify(hfRequest) + "\n");
+      python.stdin.end();
+    });
+  }
+  
+  private async callParlerTTSMultilingual(request: TTSRequest): Promise<Buffer> {
+    const scriptPath = path.join(__dirname, "ml-services", "parler_tts_multilingual_service.py");
+    
+    return new Promise(async (resolve, reject) => {
+      const python = spawn(this.pythonPath, [scriptPath]);
+      
+      let stdoutData = "";
+      let stderrData = "";
+
+      if (!python.stdout || !python.stdin || !python.stderr) {
+        reject(new Error("Failed to create Parler-TTS Multilingual process streams"));
+        return;
+      }
+
+      python.stdout.on("data", (data) => {
+        stdoutData += data.toString();
+      });
+
+      python.stderr.on("data", (data) => {
+        stderrData += data.toString();
+      });
+
+      python.on("close", (code) => {
+        if (code !== 0) {
+          reject(new Error(`Parler-TTS Multi process exited with code ${code}: ${stderrData}`));
+          return;
+        }
+
+        try {
+          const response: any = JSON.parse(stdoutData);
+          
+          if (response.error) {
+            reject(new Error(`Parler-TTS Multi error: ${response.message}`));
+            return;
+          }
+
+          if (!response.audio) {
+            reject(new Error("No audio data in Parler-TTS Multi response"));
+            return;
+          }
+
+          // Decode base64 audio
+          const audioBuffer = Buffer.from(response.audio, "base64");
+          resolve(audioBuffer);
+        } catch (error) {
+          reject(new Error(`Failed to parse Parler-TTS Multi response: ${error}`));
+        }
+      });
+
+      python.on("error", (error) => {
+        reject(new Error(`Failed to spawn Parler-TTS Multi process: ${error.message}`));
+      });
+
+      // Look up voice from voice library
+      let voicePrompt = "A clear and natural voice with moderate speed";
+      
+      if (request.voice) {
+        try {
+          // Import voice library from shared module
+          const { VOICE_LIBRARY } = await import("@shared/voices");
+          const voice = VOICE_LIBRARY.find((v) => v.id === request.voice);
+          
+          if (voice) {
+            voicePrompt = voice.prompt;
+          }
+        } catch (error) {
+          console.warn("[Parler-TTS Multi] Failed to load voice library, using defaults:", error);
+        }
+      }
+
+      // Prepare request for Parler-TTS Multilingual service
+      const parlerRequest = {
+        command: "synthesize",
+        text: request.text,
+        voice_prompt: voicePrompt,
+      };
+
+      python.stdin.write(JSON.stringify(parlerRequest) + "\n");
       python.stdin.end();
     });
   }
