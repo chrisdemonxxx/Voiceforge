@@ -8,6 +8,7 @@ import type {
 } from "@shared/schema";
 import { wsClientMessageSchema } from "@shared/schema";
 import { pythonBridge } from "./python-bridge";
+import { storage } from "./storage";
 
 // Real-time session management
 class SessionManager {
@@ -194,13 +195,25 @@ export class RealTimeGateway {
     const conn = this.connections.get(ws);
     if (!conn) return;
     
-    // TODO: Validate API key from config or URL params
-    const apiKeyId = "demo"; // Placeholder
+    // Validate API key
+    const apiKeyRecord = await storage.getApiKeyByKey(message.apiKey);
     
-    // Create session
-    const session = this.sessions.createSession(apiKeyId, message.config.mode);
+    if (!apiKeyRecord) {
+      this.sendError(ws, message.eventId, "INVALID_API_KEY", "Invalid API key provided", false);
+      ws.close(4001, "Invalid API key");
+      return;
+    }
+    
+    if (!apiKeyRecord.active) {
+      this.sendError(ws, message.eventId, "INACTIVE_API_KEY", "API key is not active", false);
+      ws.close(4002, "API key is not active");
+      return;
+    }
+    
+    // Create session with validated API key
+    const session = this.sessions.createSession(apiKeyRecord.id, message.config.mode);
     conn.sessionId = session.id;
-    conn.apiKeyId = apiKeyId;
+    conn.apiKeyId = apiKeyRecord.id;
     conn.config = message.config;
     
     console.log(`[RealTime] Session ${session.id} initialized`, {
@@ -209,6 +222,7 @@ export class RealTimeGateway {
       tts: message.config.ttsEnabled,
       agent: message.config.agentEnabled,
       agentMode: message.config.agentMode,
+      apiKeyId: apiKeyRecord.id,
     });
     
     // Send ready acknowledgment
@@ -527,8 +541,9 @@ export class RealTimeGateway {
     
     // Track latency
     this.startLatencyTracking(message.eventId, message.timestamp);
+    const networkLatency = Date.now() - message.timestamp;
     
-    // Echo back as STT final result (for testing)
+    // Echo back as STT final result (for text mode, no actual STT processing needed)
     this.sendMessage(ws, {
       type: "stt_final",
       eventId: message.eventId,
@@ -538,35 +553,172 @@ export class RealTimeGateway {
       duration: 0,
       latency: {
         capture: 0,
-        network: Date.now() - message.timestamp,
+        network: networkLatency,
         processing: 0,
-        total: Date.now() - message.timestamp,
+        total: networkLatency,
       },
     });
     
-    // TODO: Process through agent if enabled
-    // For now, send mock agent response
-    setTimeout(() => {
+    // VLLM Agent response (if enabled)
+    const agentProcessingStart = Date.now();
+    let agentResponse = "";
+    
+    if (conn.config?.agentEnabled) {
+      this.sendMessage(ws, {
+        type: "agent_thinking",
+        eventId: message.eventId,
+        status: "Processing your request...",
+      });
+      
+      try {
+        // Call VLLM agent with the text input
+        const vllmResult = await pythonBridge.callVLLM({
+          session_id: conn.sessionId,
+          message: message.text,
+          mode: conn.config?.agentMode || "assistant",
+          system_prompt: conn.config?.systemPrompt,
+        });
+        
+        agentResponse = vllmResult.response;
+        
+        this.sendMessage(ws, {
+          type: "agent_reply",
+          eventId: message.eventId,
+          text: agentResponse,
+          timestamp: Date.now(),
+        });
+      } catch (error: any) {
+        console.error("[RealTime] VLLM agent error:", error);
+        
+        // Fallback response on error
+        agentResponse = `I received your message: "${message.text}"`;
+        
+        this.sendMessage(ws, {
+          type: "agent_reply",
+          eventId: message.eventId,
+          text: agentResponse,
+          timestamp: Date.now(),
+        });
+      }
+    } else {
+      // If agent not enabled, echo the input
+      agentResponse = `Echo: ${message.text}`;
       this.sendMessage(ws, {
         type: "agent_reply",
         eventId: message.eventId,
-        text: `Echo: ${message.text}`,
+        text: agentResponse,
         timestamp: Date.now(),
       });
+    }
+    
+    const agentProcessingTime = Date.now() - agentProcessingStart;
+    
+    // Real TTS generation with streaming (if enabled and we have agent response)
+    const ttsProcessingStart = Date.now();
+    let firstChunkLatency = 0;
+    let totalChunks = 0;
+    
+    if (conn.config?.ttsEnabled && agentResponse) {
+      try {
+        await pythonBridge.callTTSStreaming(
+          {
+            text: agentResponse,
+            model: conn.config?.model || "chatterbox",
+            voice: conn.config?.voice,
+            speed: 1.0,
+            chunk_duration_ms: 200,
+          },
+          (chunk) => {
+            if (chunk.type === "error") {
+              console.error("[RealTime] TTS streaming error:", chunk.message);
+              return;
+            }
+            
+            // Track first chunk latency
+            if (chunk.sequence === 0) {
+              firstChunkLatency = chunk.latency_ms || 0;
+            }
+            
+            totalChunks++;
+            
+            // Send TTS chunk to client
+            this.sendMessage(ws, {
+              type: "tts_chunk",
+              eventId: message.eventId,
+              chunk: chunk.chunk || "",
+              sequence: chunk.sequence || 0,
+              done: chunk.done || false,
+            });
+          }
+        );
       
-      // TODO: Generate TTS for agent response
-      // For now, send mock TTS completion
-      this.sendMessage(ws, {
-        type: "tts_complete",
-        eventId: message.eventId,
-        duration: 1.0,
-        latency: {
-          processing: 50,
-          streaming: 10,
-          total: 60,
-        },
-      });
-    }, 100);
+        const ttsProcessingTime = Date.now() - ttsProcessingStart;
+        
+        // Send TTS complete with latency
+        this.sendMessage(ws, {
+          type: "tts_complete",
+          eventId: message.eventId,
+          duration: totalChunks * 0.2,
+          latency: {
+            processing: ttsProcessingTime,
+            streaming: firstChunkLatency,
+            total: ttsProcessingTime,
+          },
+        });
+      } catch (error: any) {
+        console.error("[RealTime] TTS streaming failed:", error);
+        
+        // Send completion even on error
+        const ttsProcessingTime = Date.now() - ttsProcessingStart;
+        
+        this.sendMessage(ws, {
+          type: "tts_complete",
+          eventId: message.eventId,
+          duration: 0,
+          latency: {
+            processing: ttsProcessingTime,
+            streaming: 0,
+            total: ttsProcessingTime,
+          },
+        });
+      }
+    }
+    
+    const ttsProcessingTime = Date.now() - ttsProcessingStart;
+    
+    // Send overall metrics
+    const totalLatency = Date.now() - message.timestamp;
+    this.sendMessage(ws, {
+      type: "metrics",
+      eventId: message.eventId,
+      metrics: {
+        sttLatency: 0,
+        ttsLatency: ttsProcessingTime,
+        agentLatency: agentProcessingTime,
+        endToEndLatency: totalLatency,
+        activeConnections: this.connections.size,
+        queueDepth: 0,
+      },
+    });
+    
+    // Store comprehensive metrics sample
+    this.addMetricsSample({
+      timestamp: Date.now(),
+      stt: 0,
+      agent: agentProcessingTime,
+      tts: ttsProcessingTime,
+      e2e: totalLatency,
+      queueDepth: this.getCurrentQueueDepth(),
+      activeConnections: this.connections.size,
+      errorStage: null,
+    });
+    
+    // Update session stats
+    const session = this.sessions.getSession(conn.sessionId);
+    if (session) {
+      session.messagesProcessed++;
+      session.avgLatency = ((session.avgLatency * (session.messagesProcessed - 1)) + totalLatency) / session.messagesProcessed;
+    }
   }
   
   private async handleControl(ws: WebSocket, message: Extract<WSClientMessage, { type: "pause" | "resume" | "end" }>) {
