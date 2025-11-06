@@ -207,27 +207,25 @@ export class TelephonySignaling {
     const phoneNumbers = await storage.getAllPhoneNumbers(provider.id);
     const fromNumber = phoneNumbers.find((pn: any) => pn.active)?.phoneNumber || "+10000000000";
 
-    // Initiate call through telephony service (for actual call placement)
-    // Note: We use our sessionId, not the telephonyService's internal session ID
-    await this.telephonyService.initiateCall({
+    // Initiate call through telephony service (creates call record and places actual call)
+    const callSession = await this.telephonyService.initiateCall({
       providerId: provider.id,
       from: fromNumber,
       to: message.phoneNumber,
       flowId: message.flowId,
     });
 
-    // Persist call record to database
-    const callRecord = await storage.createCall({
-      providerId: provider.id,
-      from: fromNumber,
-      to: message.phoneNumber,
-      direction: "outbound",
-      status: "initiated",
-      flowId: message.flowId || null,
-      campaignId: null,
-      phoneNumberId: phoneNumbers.find((pn: any) => pn.phoneNumber === fromNumber)?.id || null,
+    // Get the call record created by initiateCall
+    const callRecord = await storage.getCall(callSession.callId);
+    if (!callRecord) {
+      throw new Error("Call record not found after initiation");
+    }
+
+    // Update call record with WebSocket session metadata
+    await storage.updateCall(callRecord.id, {
       metadata: {
-        sessionId,
+        ...callRecord.metadata,
+        wsSessionId: sessionId,
         userAgent: "WebRTC Dialer",
       },
     });

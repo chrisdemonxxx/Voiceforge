@@ -1,4 +1,5 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
+import express from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
@@ -1059,9 +1060,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Twilio webhook validation middleware
+  // Uses req.rawBody captured by express.json verify in server/index.ts
+  const validateTwilioWebhook = async (req: Request, res: Response, next: Function) => {
+    try {
+      const signature = req.headers['x-twilio-signature'] as string;
+      
+      if (!signature) {
+        console.warn("[Telephony] Missing Twilio signature, rejecting webhook");
+        return res.status(403).json({ error: "Forbidden: Missing signature" });
+      }
+
+      // Get raw body for signature validation (preserved by express.json verify callback)
+      const rawBody = (req as any).rawBody as Buffer;
+      if (!rawBody) {
+        console.warn("[Telephony] Missing raw body for signature validation");
+        return res.status(403).json({ error: "Forbidden: Cannot validate signature" });
+      }
+
+      // Get provider from session/call to retrieve auth token
+      let authToken: string | undefined;
+      
+      if (req.params.sessionId) {
+        const session = telephonyService.getSession(req.params.sessionId);
+        if (session) {
+          const provider = await storage.getTelephonyProvider(session.providerId);
+          const creds = provider?.credentials as { authToken?: string } | null;
+          authToken = creds?.authToken;
+        }
+      } else if (req.params.callId) {
+        const call = await storage.getCall(req.params.callId);
+        if (call) {
+          const provider = await storage.getTelephonyProvider(call.providerId);
+          const creds = provider?.credentials as { authToken?: string } | null;
+          authToken = creds?.authToken;
+        }
+      }
+
+      if (!authToken) {
+        console.warn("[Telephony] Could not retrieve auth token for validation");
+        return res.status(403).json({ error: "Forbidden: Invalid configuration" });
+      }
+
+      // Construct full URL for validation
+      const protocol = req.headers['x-forwarded-proto'] || 'https';
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const url = `${protocol}://${host}${req.originalUrl}`;
+
+      // Parse raw body as URL-encoded for signature validation (Twilio sends form data)
+      const bodyParams = Object.fromEntries(new URLSearchParams(rawBody.toString('utf8')));
+
+      const { TwilioProvider } = await import("./services/telephony-providers/twilio-provider");
+      const isValid = TwilioProvider.validateWebhookSignature(
+        authToken,
+        signature,
+        url,
+        bodyParams
+      );
+
+      if (!isValid) {
+        console.warn("[Telephony] Invalid Twilio webhook signature");
+        return res.status(403).json({ error: "Forbidden: Invalid signature" });
+      }
+
+      next();
+    } catch (error: any) {
+      console.error("[Telephony] Webhook validation error:", error);
+      res.status(500).json({ error: "Validation failed" });
+    }
+  };
+
   // Twilio Webhook Routes
   // TwiML generation endpoint - returns instructions for handling the call
-  app.post("/api/telephony/twiml/:sessionId", async (req, res) => {
+  app.post("/api/telephony/twiml/:sessionId", validateTwilioWebhook, async (req, res) => {
     try {
       const { sessionId } = req.params;
       const session = telephonyService.getSession(sessionId);
@@ -1072,11 +1143,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.send('<Response><Say>Call session not found</Say><Hangup/></Response>');
       }
 
-      // Generate WebSocket stream URL for real-time audio
+      // Generate WebSocket stream URL for real-time audio with auth token
       const baseUrl = process.env.REPLIT_DOMAINS 
         ? `wss://${process.env.REPLIT_DOMAINS.split(',')[0]}`
         : 'ws://localhost:5000';
-      const streamUrl = `${baseUrl}/ws/telephony/${sessionId}/stream`;
+      
+      // Generate one-time token for this stream session
+      const crypto = await import("crypto");
+      const streamToken = crypto.randomBytes(32).toString('hex');
+      
+      // Store token for validation (TTL: 5 minutes)
+      session.metadata.streamToken = streamToken;
+      session.metadata.streamTokenExpiry = Date.now() + 5 * 60 * 1000;
+      
+      const streamUrl = `${baseUrl}/ws/twilio-media/${sessionId}?token=${streamToken}`;
 
       // Generate TwiML with streaming and optional greeting
       const { TwilioProvider } = await import("./services/telephony-providers/twilio-provider");
@@ -1096,7 +1176,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Status callback endpoint - receives call status updates
-  app.post("/api/telephony/status/:callId", async (req, res) => {
+  app.post("/api/telephony/status/:callId", validateTwilioWebhook, async (req, res) => {
     try {
       const { callId } = req.params;
       const { CallStatus, CallDuration, RecordingUrl } = req.body;
@@ -1138,6 +1218,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("[Telephony] Status callback error:", error);
       res.sendStatus(500);
     }
+  });
+
+  // Twilio Media Stream WebSocket Handler
+  // This handles real-time audio streaming from Twilio calls
+  const twilioMediaWss = new WebSocketServer({ noServer: true });
+  
+  httpServer.on('upgrade', (request, socket, head) => {
+    const pathname = new URL(request.url!, `http://${request.headers.host}`).pathname;
+    
+    // Check if this is a Twilio media stream request
+    if (pathname.startsWith('/ws/twilio-media/')) {
+      twilioMediaWss.handleUpgrade(request, socket, head, (ws) => {
+        twilioMediaWss.emit('connection', ws, request);
+      });
+    }
+  });
+
+  twilioMediaWss.on('connection', (ws: WebSocket, request: any) => {
+    const url = new URL(request.url!, `http://${request.headers.host}`);
+    const pathname = url.pathname;
+    const sessionId = pathname.split('/')[3]; // Extract sessionId from /ws/twilio-media/:sessionId
+    const token = url.searchParams.get('token');
+    
+    console.log(`[TwilioMedia] Stream connection attempt for session: ${sessionId}`);
+    
+    // Validate authentication token
+    const session = telephonyService.getSession(sessionId);
+    if (!session) {
+      console.warn(`[TwilioMedia] Invalid session: ${sessionId}`);
+      ws.close(4001, 'Invalid session');
+      return;
+    }
+    
+    const expectedToken = session.metadata.streamToken;
+    const tokenExpiry = session.metadata.streamTokenExpiry;
+    
+    if (!expectedToken || !token || token !== expectedToken) {
+      console.warn(`[TwilioMedia] Invalid auth token for session: ${sessionId}`);
+      ws.close(4001, 'Unauthorized');
+      return;
+    }
+    
+    if (Date.now() > tokenExpiry) {
+      console.warn(`[TwilioMedia] Expired auth token for session: ${sessionId}`);
+      ws.close(4001, 'Token expired');
+      return;
+    }
+    
+    // Clear one-time token after successful authentication
+    delete session.metadata.streamToken;
+    delete session.metadata.streamTokenExpiry;
+    
+    console.log(`[TwilioMedia] Stream authenticated for session: ${sessionId}`);
+    
+    let streamSid: string | null = null;
+    let callSid: string | null = null;
+    let audioBuffer: Buffer[] = [];
+    
+    ws.on('message', async (data: Buffer) => {
+      try {
+        const message = JSON.parse(data.toString());
+        
+        switch (message.event) {
+          case 'connected':
+            console.log(`[TwilioMedia] Connected: protocol=${message.protocol}`);
+            break;
+            
+          case 'start':
+            streamSid = message.streamSid;
+            callSid = message.start.callSid;
+            console.log(`[TwilioMedia] Stream started: ${streamSid}, call: ${callSid}`);
+            
+            // Update call record with stream info
+            const session = telephonyService.getSession(sessionId);
+            if (session) {
+              await storage.updateCall(session.callId, {
+                metadata: {
+                  streamSid,
+                  callSid,
+                },
+              });
+            }
+            break;
+            
+          case 'media':
+            // Twilio sends base64-encoded μ-law audio at 8kHz
+            const payload = message.media.payload;
+            const audioChunk = Buffer.from(payload, 'base64');
+            
+            // NOTE: Twilio audio format is 8kHz μ-law, but Whisper STT expects 16kHz PCM
+            // TODO: Add audio format conversion (μ-law → PCM + resample 8kHz → 16kHz)
+            // Options:
+            //   1. Convert in Node.js using audio processing library (e.g., sox-audio, node-opus)
+            //   2. Update Python STT service to handle Twilio format directly (preferred)
+            // For production, implement option 2 in stt_service.py with librosa/scipy resampling
+            
+            // Buffer audio for processing
+            audioBuffer.push(audioChunk);
+            
+            // Send audio to telephony service for processing
+            // Will need format conversion before STT can process correctly
+            await telephonyService.processAudioChunk(sessionId, audioChunk);
+            
+            // TODO: Implement bidirectional audio
+            // 1. Get synthesized response from ML pipeline (STT → VLLM → TTS)
+            // 2. Convert PCM response to μ-law at 8kHz
+            // 3. Send back to Twilio using media 'mark' and 'media' events
+            break;
+            
+          case 'stop':
+            console.log(`[TwilioMedia] Stream stopped: ${streamSid}`);
+            audioBuffer = [];
+            break;
+            
+          default:
+            console.log(`[TwilioMedia] Unknown event: ${message.event}`);
+        }
+      } catch (error: any) {
+        console.error('[TwilioMedia] Message error:', error.message);
+      }
+    });
+    
+    ws.on('close', () => {
+      console.log(`[TwilioMedia] Stream disconnected: ${sessionId}`);
+      audioBuffer = [];
+    });
+    
+    ws.on('error', (error) => {
+      console.error('[TwilioMedia] WebSocket error:', error);
+    });
   });
   
   // WebSocket Server for Real-time Streaming (legacy)
