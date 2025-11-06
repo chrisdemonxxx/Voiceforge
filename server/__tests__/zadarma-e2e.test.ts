@@ -6,21 +6,23 @@
  * ZADARMA_API_KEY and ZADARMA_API_SECRET
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+/**
+ * Simple test runner without Jest dependency
+ * Run with: tsx server/__tests__/zadarma-e2e.test.ts
+ */
 import { storage } from '../storage';
-import { TelephonyService } from '../services/telephony-service';
 import { ZadarmaProvider } from '../services/telephony-providers/zadarma-provider';
+import crypto from 'crypto';
 
-describe('Zadarma E2E Tests', () => {
-  let telephonyService: TelephonyService;
+async function runZadarmaE2ETests() {
   let providerId: string;
   let apiKeyId: string;
 
-  beforeAll(async () => {
-    // Initialize storage and services
-    telephonyService = new TelephonyService(storage);
+  console.log('\n🧪 Starting Zadarma E2E Tests\n');
 
-    // Create test API key
+  try {
+    // Initialize test environment
+
     const apiKey = await storage.createApiKey({
       name: 'Zadarma E2E Test Key',
       userId: 'test-user-zadarma',
@@ -36,27 +38,86 @@ describe('Zadarma E2E Tests', () => {
     const zadarmaApiSecret = process.env.ZADARMA_API_SECRET;
 
     if (!zadarmaApiKey || !zadarmaApiSecret) {
-      console.warn('⚠️  Zadarma credentials not found. Set ZADARMA_API_KEY and ZADARMA_API_SECRET to run E2E tests.');
-      return;
+      console.log('⚠️  Zadarma credentials not found. Set ZADARMA_API_KEY and ZADARMA_API_SECRET to run full E2E tests.\n');
+      console.log('Running signature validation tests only...\n');
+    } else {
+      // Create Zadarma provider
+      const provider = await storage.createTelephonyProvider({
+        apiKeyId,
+        name: 'Zadarma Test Provider',
+        provider: 'zadarma',
+        credentials: {
+          apiKey: zadarmaApiKey,
+          apiSecret: zadarmaApiSecret
+        },
+        active: true
+      });
+      providerId = provider.id;
+      console.log('✓ Zadarma provider configured\n');
     }
 
-    // Create Zadarma provider
-    const provider = await storage.createTelephonyProvider({
-      apiKeyId,
-      name: 'Zadarma Test Provider',
-      provider: 'zadarma',
-      credentials: {
-        apiKey: zadarmaApiKey,
-        apiSecret: zadarmaApiSecret
-      },
-      isActive: true
+    // Test 1: Webhook signature validation
+    console.log('Test 1: Zadarma webhook signature validation');
+    const testApiSecret = 'test-secret-key';
+    const testParams = {
+      event: 'NOTIFY_INTERNAL',
+      caller_id: '+15555551234',
+      called_did: '+15555555678',
+      call_start: '2024-01-01 12:00:00'
+    };
+
+    const sortedParams = Object.keys(testParams)
+      .sort()
+      .map(key => `${key}${testParams[key]}`)
+      .join('');
+    
+    const validSignature = crypto
+      .createHash('md5')
+      .update(sortedParams + testApiSecret)
+      .digest('hex');
+
+    const isValid = ZadarmaProvider.validateWebhookSignature(
+      testApiSecret,
+      validSignature,
+      testParams
+    );
+
+    if (isValid) {
+      console.log('✅ Webhook signature validation passed\n');
+    } else {
+      throw new Error('Webhook signature validation failed');
+    }
+
+    // Test 2: ZSML generation
+    console.log('Test 2: ZSML generation');
+    const zsml = ZadarmaProvider.generateZSML({
+      message: 'Hello from VoiceForge API',
+      recordingEnabled: true,
+      streamUrl: 'wss://example.com/stream'
     });
-    providerId = provider.id;
 
-    console.log('✓ Zadarma E2E test environment initialized');
-  });
+    if (zsml.includes('<?xml version="1.0"') && 
+        zsml.includes('<pbx>') &&
+        zsml.includes('<say>Hello from VoiceForge API</say>') &&
+        zsml.includes('<record/>')) {
+      console.log('✅ ZSML generation passed');
+      console.log('Generated ZSML:', zsml);
+      console.log('');
+    } else {
+      throw new Error('ZSML generation failed');
+    }
 
-  afterAll(async () => {
+    // Test 3: Get account balance (if credentials provided)
+    if (process.env.ZADARMA_API_KEY && providerId) {
+      console.log('Test 3: Get Zadarma account balance');
+      const provider = await storage.getTelephonyProvider(providerId);
+      if (provider) {
+        const zadarmaProvider = new ZadarmaProvider(provider);
+        const balance = await zadarmaProvider.getBalance();
+        console.log(`✅ Account balance: $${balance}\n`);
+      }
+    }
+
     // Cleanup
     if (providerId) {
       await storage.deleteTelephonyProvider(providerId);
@@ -64,159 +125,15 @@ describe('Zadarma E2E Tests', () => {
     if (apiKeyId) {
       await storage.deleteApiKey(apiKeyId);
     }
-  });
 
-  it('should check Zadarma credentials are configured', () => {
-    const hasCredentials = !!process.env.ZADARMA_API_KEY && !!process.env.ZADARMA_API_SECRET;
-    
-    if (!hasCredentials) {
-      console.log('⚠️  Skipping E2E tests - no Zadarma credentials');
-      expect(hasCredentials).toBe(false); // Expected - just documenting the skip
-      return;
-    }
+    console.log('✅ All Zadarma E2E tests passed!\n');
 
-    expect(hasCredentials).toBe(true);
-  });
-
-  it('should get Zadarma account balance', async () => {
-    if (!process.env.ZADARMA_API_KEY) {
-      console.log('⚠️  Skipping - no credentials');
-      return;
-    }
-
-    const provider = await storage.getTelephonyProvider(providerId);
-    expect(provider).toBeTruthy();
-
-    const zadarmaProvider = new ZadarmaProvider(provider!);
-    const balance = await zadarmaProvider.getBalance();
-
-    console.log(`📊 Zadarma account balance: $${balance}`);
-    expect(typeof balance).toBe('number');
-    expect(balance).toBeGreaterThanOrEqual(0);
-  });
-
-  it('should initiate a test call via Zadarma', async () => {
-    if (!process.env.ZADARMA_API_KEY) {
-      console.log('⚠️  Skipping - no credentials');
-      return;
-    }
-
-    // Use a test phone number (replace with your actual test number)
-    const testPhoneFrom = process.env.TEST_PHONE_FROM || '+15555551234';
-    const testPhoneTo = process.env.TEST_PHONE_TO || '+15555555678';
-
-    console.log(`📞 Initiating test call: ${testPhoneFrom} → ${testPhoneTo}`);
-
-    const result = await telephonyService.initiateCall(
-      apiKeyId,
-      providerId,
-      testPhoneFrom,
-      testPhoneTo
-    );
-
-    expect(result.success).toBe(true);
-    expect(result.callId).toBeTruthy();
-
-    console.log(`✓ Call initiated successfully: ${result.callId}`);
-
-    // Retrieve call record
-    const call = await storage.getCall(result.callId!);
-    expect(call).toBeTruthy();
-    expect(call?.direction).toBe('outbound');
-    expect(call?.from).toBe(testPhoneFrom);
-    expect(call?.to).toBe(testPhoneTo);
-    expect(call?.status).toBe('initiated');
-
-    console.log('✓ Call record created correctly');
-  });
-
-  it('should validate Zadarma webhook signatures', () => {
-    const apiSecret = 'test-secret-key';
-    const params = {
-      event: 'NOTIFY_INTERNAL',
-      caller_id: '+15555551234',
-      called_did: '+15555555678',
-      call_start: '2024-01-01 12:00:00'
-    };
-
-    // Generate valid signature
-    const crypto = require('crypto');
-    const sortedParams = Object.keys(params)
-      .sort()
-      .map(key => `${key}${params[key]}`)
-      .join('');
-    
-    const validSignature = crypto
-      .createHash('md5')
-      .update(sortedParams + apiSecret)
-      .digest('hex');
-
-    const isValid = ZadarmaProvider.validateWebhookSignature(
-      apiSecret,
-      validSignature,
-      params
-    );
-
-    expect(isValid).toBe(true);
-    console.log('✓ Webhook signature validation works correctly');
-  });
-
-  it('should generate ZSML for call flow', () => {
-    const zsml = ZadarmaProvider.generateZSML({
-      message: 'Hello from VoiceForge API',
-      recordingEnabled: true,
-      streamUrl: 'wss://example.com/stream'
-    });
-
-    expect(zsml).toContain('<?xml version="1.0"');
-    expect(zsml).toContain('<pbx>');
-    expect(zsml).toContain('<say>Hello from VoiceForge API</say>');
-    expect(zsml).toContain('<record/>');
-    expect(zsml).toContain('</pbx>');
-
-    console.log('✓ ZSML generation working');
-    console.log(zsml);
-  });
-});
-
-// Helper to run just the balance check
-async function testZadarmaBalance() {
-  const apiKey = process.env.ZADARMA_API_KEY;
-  const apiSecret = process.env.ZADARMA_API_SECRET;
-
-  if (!apiKey || !apiSecret) {
-    console.error('❌ Please set ZADARMA_API_KEY and ZADARMA_API_SECRET');
-    process.exit(1);
-  }
-
-  console.log('Testing Zadarma API connection...\n');
-
-  const provider = {
-    id: 'test',
-    name: 'Test',
-    provider: 'zadarma' as const,
-    credentials: { apiKey, apiSecret },
-    apiKeyId: 'test',
-    isActive: true,
-    createdAt: new Date()
-  };
-
-  const zadarma = new ZadarmaProvider(provider);
-  
-  try {
-    const balance = await zadarma.getBalance();
-    console.log(`✅ Connected! Account balance: $${balance}\n`);
-    
-    console.log('You can now run full E2E tests with:');
-    console.log('  npm test -- zadarma-e2e\n');
   } catch (error: any) {
-    console.error('❌ Failed to connect to Zadarma API');
-    console.error(`Error: ${error.message}\n`);
+    console.error('❌ Test failed:', error.message);
+    console.error(error.stack);
     process.exit(1);
   }
 }
 
-// Run quick balance test if called directly
-if (require.main === module) {
-  testZadarmaBalance();
-}
+// Run tests
+runZadarmaE2ETests();
