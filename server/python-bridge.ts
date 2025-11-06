@@ -492,9 +492,9 @@ export class PythonBridge {
       
       if (request.voice) {
         try {
-          // Import voice library dynamically
-          const { VOICE_LIBRARY } = await import("../client/src/lib/constants.js");
-          const voice = VOICE_LIBRARY.find((v: any) => v.id === request.voice);
+          // Import voice library from shared module
+          const { VOICE_LIBRARY } = await import("@shared/voices");
+          const voice = VOICE_LIBRARY.find((v) => v.id === request.voice);
           
           if (voice) {
             voicePrompt = voice.prompt;
