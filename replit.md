@@ -17,7 +17,13 @@ The platform adopts a developer-centric aesthetic inspired by platforms like Str
 *   **ML Services (Python)**: Incorporates Chatterbox, Higgs Audio V2, and StyleTTS2 for TTS; Whisper-large-v3-turbo (faster-whisper) for STT; Silero VAD for VAD; and Llama 3.3 / Qwen 2.5 via VLLM for conversational AI.
 
 ### Feature Specifications
-*   **Text-to-Speech (TTS)**: Supports 3 models (Chatterbox, Higgs Audio V2, StyleTTS2) across 23+ languages with sub-200ms latency and multiple audio formats.
+*   **Text-to-Speech (TTS)**: 
+    - **Base Models**: Chatterbox, Higgs Audio V2, StyleTTS2 for general-purpose synthesis
+    - **Indian Language Support**: Integrated ai4bharat/indic-parler-tts via Hugging Face Inference API
+    - **Voice Library**: 69 pre-configured voices across 21 Indian languages (Hindi, Tamil, Telugu, Malayalam, Bengali, Urdu, Gujarati, Kannada, Marathi, Punjabi, Odia, Assamese, Nepali, Sindhi, Kashmiri, Sanskrit, Manipuri, Bodo, Dogri, Konkani, Maithili)
+    - **Voice Selection UI**: Language and gender filters, voice preview with descriptions
+    - **Performance**: Sub-200ms latency for base models; 5-20s for HF Inference API (cold start)
+    - **Formats**: Multiple audio formats supported
 *   **Speech-to-Text (STT)**: Utilizes Whisper-large-v3-turbo for 99+ languages, offering high accuracy (98.5%+) and streaming support.
 *   **Voice Activity Detection (VAD)**: Employs Silero VAD for precise, real-time speech segmentation.
 *   **Voice Cloning**: Provides zero-shot cloning with 5-second samples, supported by Chatterbox and Higgs Audio V2.
