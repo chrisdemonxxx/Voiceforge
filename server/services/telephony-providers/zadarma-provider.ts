@@ -35,16 +35,28 @@ export class ZadarmaProvider {
 
   /**
    * Generate Zadarma API signature
-   * MD5(url + params + apiSecret)
+   * Algorithm: base64(hmac_sha1(method + params + md5(params), secret))
+   * See: https://zadarma.com/en/support/api/
    */
   private generateSignature(method: string, params: Record<string, any> = {}): string {
+    // Step 1: Sort parameters alphabetically and build query string
     const sortedParams = Object.keys(params)
       .sort()
       .map(key => `${key}=${params[key]}`)
       .join('&');
     
-    const signString = method + sortedParams + this.apiSecret;
-    return crypto.createHash('md5').update(signString).digest('hex');
+    // Step 2: Generate MD5 hash of query string
+    const md5Hash = crypto.createHash('md5').update(sortedParams).digest('hex');
+    
+    // Step 3: Create signature string: method + params + md5(params)
+    const signString = method + sortedParams + md5Hash;
+    
+    // Step 4: HMAC-SHA1 with secret key
+    const hmac = crypto.createHmac('sha1', this.apiSecret);
+    hmac.update(signString);
+    
+    // Step 5: Base64 encode
+    return hmac.digest('base64');
   }
 
   /**
