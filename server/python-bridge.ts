@@ -94,7 +94,7 @@ interface WorkerPoolMetrics {
   worker_utilization: number;
 }
 
-type WorkerType = "stt" | "tts" | "hf_tts" | "vllm";
+type WorkerType = "stt" | "tts" | "hf_tts" | "vllm" | "clone";
 
 class WorkerPool {
   private process: ChildProcess | null = null;
@@ -374,6 +374,7 @@ export class PythonBridge {
   private ttsPool: WorkerPool | null = null;
   private hfTtsPool: WorkerPool | null = null;
   private vllmPool: WorkerPool | null = null;
+  private clonePool: WorkerPool | null = null;
   
   constructor() {
     // Use python3 from PATH
@@ -398,6 +399,10 @@ export class PythonBridge {
     // Start VLLM worker pool (1 worker for now, can scale up)
     this.vllmPool = new WorkerPool("vllm", 1);
     await this.vllmPool.start();
+    
+    // Start voice cloning worker pool (1 worker for now)
+    this.clonePool = new WorkerPool("clone", 1);
+    await this.clonePool.start();
     
     console.log("[PythonBridge] Worker pools initialized");
   }
@@ -782,11 +787,74 @@ export class PythonBridge {
     });
   }
 
+  async createInstantClone(cloneId: string, audioData: Buffer, name: string): Promise<any> {
+    if (!this.clonePool) {
+      throw new Error("Voice cloning worker pool not initialized");
+    }
+    
+    const request = {
+      action: "create_instant",
+      clone_id: cloneId,
+      audio: audioData.toString("base64"),
+      name: name
+    };
+    
+    const result = await this.clonePool.submitTask(request, 0);
+    return result.result;
+  }
+  
+  async createProfessionalClone(cloneId: string, audioData: Buffer, name: string): Promise<any> {
+    if (!this.clonePool) {
+      throw new Error("Voice cloning worker pool not initialized");
+    }
+    
+    const request = {
+      action: "create_professional",
+      clone_id: cloneId,
+      audio: audioData.toString("base64"),
+      name: name
+    };
+    
+    const result = await this.clonePool.submitTask(request, 0);
+    return result.result;
+  }
+  
+  async createSyntheticClone(cloneId: string, description: string, characteristics: any): Promise<any> {
+    if (!this.clonePool) {
+      throw new Error("Voice cloning worker pool not initialized");
+    }
+    
+    const request = {
+      action: "create_synthetic",
+      clone_id: cloneId,
+      description: description,
+      characteristics: characteristics
+    };
+    
+    const result = await this.clonePool.submitTask(request, 0);
+    return result.result;
+  }
+  
+  async getCloneStatus(cloneId: string): Promise<any> {
+    if (!this.clonePool) {
+      throw new Error("Voice cloning worker pool not initialized");
+    }
+    
+    const request = {
+      action: "get_status",
+      clone_id: cloneId
+    };
+    
+    const result = await this.clonePool.submitTask(request, 0);
+    return result.result;
+  }
+
   async getMetrics() {
     const metrics: any = {
       stt: null,
       tts: null,
-      vllm: null
+      vllm: null,
+      clone: null
     };
     
     if (this.sttPool) {
@@ -813,6 +881,14 @@ export class PythonBridge {
       }
     }
     
+    if (this.clonePool) {
+      try {
+        metrics.clone = await this.clonePool.getMetrics();
+      } catch (error) {
+        console.error("[PythonBridge] Failed to get voice cloning metrics:", error);
+      }
+    }
+    
     return metrics;
   }
   
@@ -829,6 +905,14 @@ export class PythonBridge {
     
     if (this.vllmPool) {
       await this.vllmPool.shutdown();
+    }
+    
+    if (this.hfTtsPool) {
+      await this.hfTtsPool.shutdown();
+    }
+    
+    if (this.clonePool) {
+      await this.clonePool.shutdown();
     }
     
     console.log("[PythonBridge] Worker pools shut down");

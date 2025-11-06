@@ -40,6 +40,7 @@ class WorkerType(Enum):
     TTS = "tts"
     VLLM = "vllm"
     HF_TTS = "hf_tts"
+    CLONE = "clone"
 
 
 @dataclass
@@ -109,6 +110,10 @@ class Worker:
                 from vllm_service import VLLMAgentService
                 service = VLLMAgentService()
                 print(f"[Worker {self.worker_id}] VLLM agent service initialized", file=sys.stderr, flush=True)
+            elif self.worker_type == WorkerType.CLONE:
+                from voice_cloning_service import VoiceCloningService
+                service = VoiceCloningService()
+                print(f"[Worker {self.worker_id}] Voice cloning service initialized", file=sys.stderr, flush=True)
         except Exception as e:
             print(f"[Worker {self.worker_id}] Failed to initialize service: {e}", file=sys.stderr, flush=True)
             traceback.print_exc(file=sys.stderr)
@@ -188,6 +193,97 @@ class Worker:
         elif self.worker_type == WorkerType.VLLM:
             # VLLM agent task processing
             return service.generate_response(task.data)
+        elif self.worker_type == WorkerType.CLONE:
+            # Voice cloning task processing
+            action = task.data.get("action")
+            
+            if action == "create_instant":
+                clone_id = task.data["clone_id"]
+                audio_b64 = task.data["audio"]
+                name = task.data.get("name", "Untitled")
+                
+                import base64
+                audio_bytes = base64.b64decode(audio_b64)
+                result = service.create_instant_clone(clone_id, audio_bytes, name)
+                
+                # Convert dataclasses to dicts for JSON serialization
+                from dataclasses import asdict
+                return {
+                    "clone_id": result.clone_id,
+                    "mode": result.mode,
+                    "status": result.status,
+                    "characteristics": asdict(result.characteristics) if result.characteristics else None,
+                    "embedding": {
+                        "confidence": result.embedding.confidence,
+                        "sample_duration": result.embedding.sample_duration,
+                        "snr_db": result.embedding.snr_db
+                    } if result.embedding else None,
+                    "training_progress": result.training_progress,
+                    "quality_score": result.quality_score,
+                    "message": result.message
+                }
+            
+            elif action == "create_professional":
+                clone_id = task.data["clone_id"]
+                audio_b64 = task.data["audio"]
+                name = task.data.get("name", "Untitled")
+                
+                import base64
+                audio_bytes = base64.b64decode(audio_b64)
+                result = service.create_professional_clone(clone_id, audio_bytes, name)
+                
+                from dataclasses import asdict
+                return {
+                    "clone_id": result.clone_id,
+                    "mode": result.mode,
+                    "status": result.status,
+                    "characteristics": asdict(result.characteristics) if result.characteristics else None,
+                    "embedding": {
+                        "confidence": result.embedding.confidence,
+                        "sample_duration": result.embedding.sample_duration,
+                        "snr_db": result.embedding.snr_db
+                    } if result.embedding else None,
+                    "training_progress": result.training_progress,
+                    "quality_score": result.quality_score,
+                    "message": result.message
+                }
+            
+            elif action == "create_synthetic":
+                clone_id = task.data["clone_id"]
+                description = task.data.get("description", "")
+                characteristics = task.data.get("characteristics", {})
+                
+                result = service.create_synthetic_clone(clone_id, description, characteristics)
+                
+                from dataclasses import asdict
+                return {
+                    "clone_id": result.clone_id,
+                    "mode": result.mode,
+                    "status": result.status,
+                    "characteristics": asdict(result.characteristics) if result.characteristics else None,
+                    "training_progress": result.training_progress,
+                    "quality_score": result.quality_score,
+                    "message": result.message
+                }
+            
+            elif action == "get_status":
+                clone_id = task.data["clone_id"]
+                result = service.get_clone_status(clone_id)
+                
+                if result:
+                    return {
+                        "clone_id": result.clone_id,
+                        "mode": result.mode,
+                        "status": result.status,
+                        "training_progress": result.training_progress,
+                        "quality_score": result.quality_score,
+                        "message": result.message
+                    }
+                else:
+                    raise ValueError(f"Clone not found: {clone_id}")
+            
+            else:
+                raise ValueError(f"Unknown voice cloning action: {action}")
         else:
             raise ValueError(f"Unknown worker type: {self.worker_type}")
     
@@ -346,7 +442,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="ML Worker Pool")
     parser.add_argument("--workers", type=int, default=2, help="Number of workers")
-    parser.add_argument("--worker-type", type=str, choices=["stt", "tts", "hf_tts", "vllm"], default="stt")
+    parser.add_argument("--worker-type", type=str, choices=["stt", "tts", "hf_tts", "vllm", "clone"], default="stt")
     args = parser.parse_args()
     
     worker_type = WorkerType(args.worker_type)

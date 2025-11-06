@@ -329,57 +329,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/clone-voice", authenticateApiKey, upload.single("reference"), async (req, res) => {
     try {
       const apiKey = (req as any).apiKey;
-      
-      // Parse the request body with cloning mode
       const data = voiceCloneRequestSchema.parse(req.body);
       
-      // Handle based on cloning mode
+      // Generate unique clone ID
+      const cloneId = `clone_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      
+      // Handle synthetic cloning
       if (data.cloningMode === "synthetic") {
-        // Synthetic voice - no audio file needed
-        const syntheticData = data as any; // TypeScript narrowing
+        const syntheticData = data as any;
         
-        // Use OpenAI to generate voice characteristics from description
-        const openai = await import("openai");
-        const client = new openai.default({
-          apiKey: process.env.OPENAI_API_KEY,
-        });
+        // Parse characteristics from request
+        const characteristics = {
+          pitch: syntheticData.pitch || 150,
+          pitch_range: syntheticData.pitch_range || 5,
+          tone: syntheticData.tone || "neutral",
+          pace: syntheticData.pace || 1.0,
+          energy: syntheticData.energy || 0.7,
+          timbre: syntheticData.timbre || "clear",
+          accent: syntheticData.accent || "neutral",
+          gender: syntheticData.gender || "neutral",
+          age_range: syntheticData.age_range || "middle",
+          emotional_baseline: syntheticData.emotional_baseline || "calm"
+        };
         
-        // Generate voice characteristics using GPT
-        const prompt = `Generate detailed voice characteristics for text-to-speech synthesis based on this description:
+        // Create synthetic clone via worker pool
+        const result = await pythonBridge.createSyntheticClone(
+          cloneId,
+          syntheticData.voiceDescription || "",
+          characteristics
+        );
         
-Description: ${syntheticData.voiceDescription}
-${syntheticData.age ? `Age: ${syntheticData.age}` : ''}
-${syntheticData.gender ? `Gender: ${syntheticData.gender}` : ''}
-${syntheticData.accent ? `Accent: ${syntheticData.accent}` : ''}
-${syntheticData.tone ? `Tone: ${syntheticData.tone}` : ''}
-
-Generate 3 different voice profile variations. For each, provide:
-1. fundamental_frequency (Hz): pitch (80-180 for male, 165-255 for female)
-2. formants (Hz): { f1: 200-1000, f2: 600-3000, f3: 1500-4000 }
-3. speaking_rate (words per minute): 100-200
-4. energy: 0.0-1.0
-5. pitch_variance: 0.0-0.5 (expressiveness)
-
-Return as JSON array of 3 variations.`;
-        
-        const completion = await client.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: "You are an expert in voice synthesis and acoustic modeling. Generate realistic voice characteristics based on descriptions."
-            },
-            {
-              role: "user",
-              content: prompt
-            }
-          ],
-          response_format: { type: "json_object" },
-        });
-        
-        const voiceCharacteristics = JSON.parse(completion.choices[0].message.content || "{}");
-        
-        // Create synthetic voice in database (use first variation as default)
+        // Save to database
         const clonedVoice = await storage.createClonedVoice({
           apiKeyId: apiKey.id,
           name: syntheticData.name,
@@ -389,8 +369,8 @@ Return as JSON array of 3 variations.`;
           processingStatus: "completed",
           voiceDescription: syntheticData.voiceDescription,
           referenceAudioPath: null,
-          voiceCharacteristics: voiceCharacteristics.variations?.[0] || voiceCharacteristics,
-          status: "ready",
+          voiceCharacteristics: result.characteristics,
+          status: result.status,
         });
         
         return res.json({
@@ -400,9 +380,9 @@ Return as JSON array of 3 variations.`;
           status: clonedVoice.status,
           cloningMode: clonedVoice.cloningMode,
           processingStatus: clonedVoice.processingStatus,
+          qualityScore: result.quality_score,
           createdAt: clonedVoice.createdAt,
           characteristics: clonedVoice.voiceCharacteristics,
-          allVariations: voiceCharacteristics.variations || [voiceCharacteristics],
         });
       }
       
@@ -412,20 +392,6 @@ Return as JSON array of 3 variations.`;
       }
       
       const instantData = data as any;
-      
-      // Validate audio duration for instant mode (30s - 2min)
-      // For professional mode (30+ minutes)
-      // TODO: Add audio duration validation
-      
-      // Analyze the reference audio to extract voice characteristics
-      const analysis = await pythonBridge.analyzeVoice(req.file.buffer);
-      
-      if (!analysis.success) {
-        return res.status(400).json({ 
-          error: "Failed to analyze reference audio",
-          details: analysis.error 
-        });
-      }
       
       // Save reference audio to filesystem
       const fs = await import("fs/promises");
@@ -437,9 +403,21 @@ Return as JSON array of 3 variations.`;
       const audioFilePath = path.join(uploadsDir, audioFileName);
       await fs.writeFile(audioFilePath, req.file.buffer);
       
-      // Determine processing status based on mode
-      const processingStatus = data.cloningMode === "instant" ? "completed" : "pending";
-      const status = data.cloningMode === "instant" ? "ready" : "processing";
+      // Create clone via worker pool
+      let result;
+      if (data.cloningMode === "instant") {
+        result = await pythonBridge.createInstantClone(cloneId, req.file.buffer, instantData.name);
+      } else {
+        result = await pythonBridge.createProfessionalClone(cloneId, req.file.buffer, instantData.name);
+      }
+      
+      // Check for cloning failure
+      if (result.status === "failed") {
+        return res.status(400).json({
+          error: "Voice cloning failed",
+          message: result.message
+        });
+      }
       
       // Create cloned voice in database
       const clonedVoice = await storage.createClonedVoice({
@@ -448,24 +426,31 @@ Return as JSON array of 3 variations.`;
         model: instantData.model,
         description: instantData.description,
         cloningMode: data.cloningMode,
-        processingStatus: processingStatus,
+        processingStatus: result.status === "ready" ? "completed" : "pending",
         referenceAudioPath: `uploads/voices/${audioFileName}`,
-        voiceCharacteristics: analysis.characteristics,
-        status: status,
+        voiceCharacteristics: result.characteristics,
+        status: result.status,
       });
       
-      // If professional mode, start background processing
-      if (data.cloningMode === "professional") {
-        // Start background processing (mock - in production would use a queue)
-        setTimeout(async () => {
+      // If professional mode and still processing, poll for status
+      if (data.cloningMode === "professional" && result.status === "processing") {
+        // Background polling to update status
+        const pollInterval = setInterval(async () => {
           try {
-            await storage.updateClonedVoiceStatus(clonedVoice.id, "ready");
-            // Update processing status to completed
-            console.log(`[Professional Clone] Voice ${clonedVoice.id} processing completed`);
+            const status = await pythonBridge.getCloneStatus(cloneId);
+            if (status.status === "ready" || status.status === "failed") {
+              await storage.updateClonedVoiceStatus(clonedVoice.id, status.status);
+              console.log(`[Professional Clone] Voice ${clonedVoice.id} ${status.status}`);
+              clearInterval(pollInterval);
+            }
           } catch (error) {
-            console.error(`[Professional Clone] Failed to update voice ${clonedVoice.id}:`, error);
+            console.error(`[Professional Clone] Failed to poll status for ${clonedVoice.id}:`, error);
+            clearInterval(pollInterval);
           }
-        }, 10000); // Mock 10 second delay (in production: 2-4 hours)
+        }, 2000); // Poll every 2 seconds
+        
+        // Stop polling after 2 minutes
+        setTimeout(() => clearInterval(pollInterval), 120000);
       }
       
       res.json({
@@ -475,6 +460,8 @@ Return as JSON array of 3 variations.`;
         status: clonedVoice.status,
         cloningMode: clonedVoice.cloningMode,
         processingStatus: clonedVoice.processingStatus,
+        trainingProgress: result.training_progress,
+        qualityScore: result.quality_score,
         createdAt: clonedVoice.createdAt,
         characteristics: clonedVoice.voiceCharacteristics,
       });
