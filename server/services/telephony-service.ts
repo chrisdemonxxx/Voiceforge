@@ -1,6 +1,7 @@
 import type { TelephonyProvider, Call, InsertCall } from "@shared/schema";
 import { storage } from "../storage";
 import type { PythonBridge } from "../python-bridge";
+import { ProviderFactory } from "./telephony-providers/provider-factory";
 
 export interface CallSession {
   id: string;
@@ -53,7 +54,17 @@ export class TelephonyService {
   }): Promise<CallSession> {
     const sessionId = this.generateSessionId();
     
-    // Create call record in database
+    // Get provider from database
+    const provider = await storage.getTelephonyProvider(options.providerId);
+    if (!provider) {
+      throw new Error(`Telephony provider ${options.providerId} not found`);
+    }
+
+    if (!provider.active) {
+      throw new Error(`Telephony provider ${provider.name} is not active`);
+    }
+
+    // Create call record in database with initial status
     const call = await storage.createCall({
       providerId: options.providerId,
       campaignId: options.campaignId,
@@ -65,23 +76,62 @@ export class TelephonyService {
       metadata: {},
     });
 
-    // Create active session
-    const session: CallSession = {
-      id: sessionId,
-      callId: call.id,
-      providerId: options.providerId,
-      from: options.from,
-      to: options.to,
-      direction: "outbound",
-      status: "queued",
-      flowId: options.flowId,
-      audioBuffer: [],
-      metadata: {},
-    };
+    try {
+      // Get provider instance and initiate actual call
+      const providerInstance = ProviderFactory.getProvider(provider);
+      
+      // Generate callback URL for TwiML
+      const baseUrl = process.env.REPLIT_DOMAINS 
+        ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}`
+        : 'http://localhost:5000';
+      
+      const callbackUrl = `${baseUrl}/api/telephony/twiml/${sessionId}`;
+      const statusCallbackUrl = `${baseUrl}/api/telephony/status/${call.id}`;
 
-    this.activeSessions.set(sessionId, session);
+      const result = await providerInstance.initiateCall({
+        from: options.from,
+        to: options.to,
+        url: callbackUrl,
+        statusCallback: statusCallbackUrl,
+        record: true,
+      });
 
-    return session;
+      // Update call record with provider call ID
+      await storage.updateCall(call.id, {
+        providerCallId: result.providerCallId,
+        status: "ringing",
+      });
+
+      // Create active session
+      const session: CallSession = {
+        id: sessionId,
+        callId: call.id,
+        providerId: options.providerId,
+        from: options.from,
+        to: options.to,
+        direction: "outbound",
+        status: "ringing",
+        flowId: options.flowId,
+        audioBuffer: [],
+        metadata: {
+          providerCallId: result.providerCallId,
+        },
+      };
+
+      this.activeSessions.set(sessionId, session);
+
+      console.log(`[TelephonyService] Call initiated: ${result.providerCallId}`);
+      
+      return session;
+    } catch (error: any) {
+      // Update call record to failed status
+      await storage.updateCall(call.id, {
+        status: "failed",
+        metadata: { error: error.message },
+      });
+      
+      throw error;
+    }
   }
 
   /**
