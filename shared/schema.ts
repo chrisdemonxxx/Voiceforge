@@ -47,7 +47,7 @@ export type InsertClonedVoice = z.infer<typeof insertClonedVoiceSchema>;
 export type ClonedVoice = typeof clonedVoices.$inferSelect;
 
 // TTS Models enum
-export const TTSModel = z.enum(["indic-parler-tts", "chatterbox", "higgs_audio_v2", "styletts2"]);
+export const TTSModel = z.enum(["indic-parler-tts", "parler-tts-multilingual", "chatterbox", "higgs_audio_v2", "styletts2"]);
 export type TTSModelType = z.infer<typeof TTSModel>;
 
 // Agent Modes enum
