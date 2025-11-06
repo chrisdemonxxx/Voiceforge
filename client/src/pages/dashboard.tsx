@@ -25,6 +25,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { AudioPlayer } from "@/components/audio-player";
 import { ModelCard } from "@/components/model-card";
 import { VoiceSelector } from "@/components/voice-selector";
@@ -47,7 +56,28 @@ export default function Dashboard() {
   const [cloneDescription, setCloneDescription] = useState("");
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
 
-  // Mock data - will be replaced with real API calls
+  // API key creation state
+  const [isKeyDialogOpen, setIsKeyDialogOpen] = useState(false);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyRateLimit, setNewKeyRateLimit] = useState("1000");
+
+  // Fetch API keys from database (no auth required for key management)
+  const { data: apiKeys = [], isLoading: apiKeysLoading } = useQuery<ApiKey[]>({
+    queryKey: ["/api/keys"],
+  });
+
+  // Helper to get auth headers with active API key
+  const getAuthHeaders = () => {
+    const activeKey = apiKeys.find(k => k.active);
+    if (!activeKey) {
+      return null;
+    }
+    return {
+      "Authorization": `Bearer ${activeKey.key}`,
+    };
+  };
+
+  // Mock usage stats - will be replaced with real API calls
   const stats: UsageStats = {
     totalRequests: 12847,
     successRate: 98.5,
@@ -59,32 +89,22 @@ export default function Dashboard() {
     vllmRequests: 300,
   };
 
-  const apiKeys: ApiKey[] = [
-    {
-      id: "1",
-      name: "Production API",
-      key: "vf_sk_1234567890abcdef",
-      createdAt: new Date("2025-01-01"),
-      usage: 8234,
-      active: true,
-      rateLimit: 1000,
-    },
-    {
-      id: "2",
-      name: "Development",
-      key: "vf_sk_0987654321fedcba",
-      createdAt: new Date("2025-01-15"),
-      usage: 423,
-      active: true,
-      rateLimit: 100,
-    },
-  ];
-
   const handleGenerateTTS = async () => {
     if (!ttsText.trim()) {
       toast({
         title: "Error",
         description: "Please enter text to synthesize",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Get the first active API key
+    const activeKey = apiKeys.find(k => k.active);
+    if (!activeKey) {
+      toast({
+        title: "Error",
+        description: "No active API key found. Please create an API key first.",
         variant: "destructive",
       });
       return;
@@ -103,7 +123,7 @@ export default function Dashboard() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer vf_sk_demo_key_1",
+          "Authorization": `Bearer ${activeKey.key}`,
         },
         body: JSON.stringify({
           text: ttsText,
@@ -139,6 +159,50 @@ export default function Dashboard() {
     }
   };
 
+  // API Key mutations
+  const createApiKeyMutation = useMutation({
+    mutationFn: async (data: { name: string; rateLimit: number }) => {
+      const response = await apiRequest("POST", "/api/keys", data);
+      return await response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/keys"] });
+      toast({
+        title: "API key created",
+        description: "Your new API key has been generated successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to create API key",
+        description: error.message || "Something went wrong",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteApiKeyMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiRequest("DELETE", `/api/keys/${id}`);
+      return await response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/keys"] });
+      toast({
+        title: "API key deleted",
+        description: "The API key has been permanently deleted",
+        variant: "destructive",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to delete API key",
+        description: error.message || "Something went wrong",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleCopyKey = (key: string) => {
     navigator.clipboard.writeText(key);
     toast({
@@ -148,16 +212,39 @@ export default function Dashboard() {
   };
 
   const handleDeleteKey = (id: string) => {
-    toast({
-      title: "API key deleted",
-      description: "The API key has been permanently deleted",
-      variant: "destructive",
+    deleteApiKeyMutation.mutate(id);
+  };
+
+  const handleCreateKey = () => {
+    if (!newKeyName.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a name for the API key",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    createApiKeyMutation.mutate({ 
+      name: newKeyName, 
+      rateLimit: parseInt(newKeyRateLimit) 
     });
+    
+    // Reset form and close dialog
+    setNewKeyName("");
+    setNewKeyRateLimit("1000");
+    setIsKeyDialogOpen(false);
   };
 
   // Voice cloning mutation
   const cloneVoiceMutation = useMutation({
     mutationFn: async (data: { name: string; model: string; description?: string; file: File }) => {
+      // Get the first active API key
+      const activeKey = apiKeys.find(k => k.active);
+      if (!activeKey) {
+        throw new Error("No active API key found. Please create an API key first.");
+      }
+
       const formData = new FormData();
       formData.append("name", data.name);
       formData.append("model", data.model);
@@ -170,7 +257,7 @@ export default function Dashboard() {
         method: "POST",
         body: formData,
         headers: {
-          "Authorization": "Bearer vf_sk_demo_key_1",
+          "Authorization": `Bearer ${activeKey.key}`,
         },
       });
 
@@ -240,12 +327,29 @@ export default function Dashboard() {
     }
   };
 
-  // Fetch cloned voices
+  // Fetch cloned voices (requires authentication)
   const { data: clonedVoices, isLoading: voicesLoading } = useQuery<any[]>({
-    queryKey: ["/api/voices"],
+    queryKey: ["/api/voices", apiKeys.length],
+    queryFn: async () => {
+      const authHeaders = getAuthHeaders();
+      if (!authHeaders) {
+        return []; // Return empty array if no active key
+      }
+      const response = await fetch("/api/voices", {
+        headers: authHeaders,
+      });
+      if (!response.ok) {
+        if (response.status === 401) {
+          return []; // Return empty array if unauthorized
+        }
+        throw new Error("Failed to fetch cloned voices");
+      }
+      return response.json();
+    },
+    enabled: apiKeys.some(k => k.active), // Only fetch when there's an active key
   });
 
-  // Fetch voice library for Indic Parler TTS
+  // Fetch voice library (no authentication required)
   const { data: voiceLibrary, isLoading: voiceLibraryLoading, error: voiceLibraryError } = useQuery<Voice[]>({
     queryKey: ["/api/voice-library"],
   });
@@ -253,10 +357,16 @@ export default function Dashboard() {
   // Delete voice mutation
   const deleteVoiceMutation = useMutation({
     mutationFn: async (voiceId: string) => {
+      // Get the first active API key
+      const activeKey = apiKeys.find(k => k.active);
+      if (!activeKey) {
+        throw new Error("No active API key found. Please create an API key first.");
+      }
+
       const response = await fetch(`/api/voices/${voiceId}`, {
         method: "DELETE",
         headers: {
-          "Authorization": "Bearer vf_sk_demo_key_1",
+          "Authorization": `Bearer ${activeKey.key}`,
         },
       });
 
@@ -690,10 +800,65 @@ export default function Dashboard() {
                     Manage your API keys for authentication
                   </CardDescription>
                 </div>
-                <Button data-testid="button-create-api-key">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create New Key
-                </Button>
+                <Dialog open={isKeyDialogOpen} onOpenChange={setIsKeyDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button data-testid="button-create-api-key">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Create New Key
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Create New API Key</DialogTitle>
+                      <DialogDescription>
+                        Generate a new API key for authentication. Keep your API key secure and never share it publicly.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="key-name">Key Name</Label>
+                        <Input
+                          id="key-name"
+                          placeholder="e.g., Production API, Development, Mobile App"
+                          value={newKeyName}
+                          onChange={(e) => setNewKeyName(e.target.value)}
+                          data-testid="input-key-name"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="rate-limit">Rate Limit (requests/hour)</Label>
+                        <Select value={newKeyRateLimit} onValueChange={setNewKeyRateLimit}>
+                          <SelectTrigger id="rate-limit" data-testid="select-rate-limit">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="100">100 requests/hour</SelectItem>
+                            <SelectItem value="500">500 requests/hour</SelectItem>
+                            <SelectItem value="1000">1,000 requests/hour</SelectItem>
+                            <SelectItem value="5000">5,000 requests/hour</SelectItem>
+                            <SelectItem value="10000">10,000 requests/hour</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsKeyDialogOpen(false)}
+                        data-testid="button-cancel-create-key"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleCreateKey}
+                        disabled={createApiKeyMutation.isPending}
+                        data-testid="button-confirm-create-key"
+                      >
+                        {createApiKeyMutation.isPending ? "Creating..." : "Create API Key"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
             </CardHeader>
             <CardContent>
