@@ -1,243 +1,88 @@
 /**
- * Zadarma Telephony Provider
- * Implements actual Zadarma API integration for calls
- * https://zadarma.com/en/support/api/
+ * Zadarma Provider (Smart Wrapper)
+ * Intelligently routes to REST API or SIP provider based on credentials
+ * - If apiKey/apiSecret provided → use REST API
+ * - If sipUsername/sipPassword provided → use SIP
  */
 
-import crypto from 'crypto';
-import type { TelephonyProvider as TelephonyProviderType, CallDirection } from '@shared/schema';
+import type { TelephonyProvider as TelephonyProviderType } from '@shared/schema';
+import { ZadarmaRESTProvider } from './zadarma-rest-provider';
+import { ZadarmaSIPProvider } from './zadarma-sip-provider';
 
-interface ZadarmaCredentials {
+interface ZadarmaRESTCredentials {
   apiKey: string;
   apiSecret: string;
 }
 
-interface CallResponse {
-  callId: string;
-  status: 'initiated' | 'ringing' | 'answered' | 'busy' | 'no-answer' | 'failed' | 'completed';
+interface ZadarmaSIPCredentials {
+  sipUsername: string;
+  sipPassword: string;
+  sipDomain?: string;
 }
 
+type ZadarmaCredentials = ZadarmaRESTCredentials | ZadarmaSIPCredentials;
+
+/**
+ * Smart Zadarma provider that auto-detects which implementation to use
+ */
 export class ZadarmaProvider {
-  private apiKey: string;
-  private apiSecret: string;
-  private baseUrl = 'https://api.zadarma.com/v1';
+  private implementation: ZadarmaRESTProvider | ZadarmaSIPProvider;
 
   constructor(provider: TelephonyProviderType) {
     const creds = provider.credentials as ZadarmaCredentials;
-    
-    if (!creds.apiKey || !creds.apiSecret) {
-      throw new Error('Zadarma provider requires apiKey and apiSecret');
-    }
 
-    // Trim credentials to remove any accidental whitespace
-    this.apiKey = creds.apiKey.trim();
-    this.apiSecret = creds.apiSecret.trim();
-  }
-
-  /**
-   * Generate Zadarma API signature
-   * Algorithm: base64(hmac_sha1(method + params + md5(params), secret))
-   * See: https://zadarma.com/en/support/api/
-   */
-  private generateSignature(method: string, params: Record<string, any> = {}): string {
-    // Step 1: Sort parameters alphabetically and build query string
-    const sortedParams = Object.keys(params)
-      .sort()
-      .map(key => `${key}=${params[key]}`)
-      .join('&');
-    
-    // Step 2: Generate MD5 hash of query string
-    const md5Hash = crypto.createHash('md5').update(sortedParams).digest('hex');
-    
-    // Step 3: Create signature string: method + params + md5(params)
-    const signString = method + sortedParams + md5Hash;
-    
-    // Step 4: HMAC-SHA1 with secret key
-    const hmac = crypto.createHmac('sha1', this.apiSecret);
-    hmac.update(signString);
-    
-    // Step 5: Base64 encode
-    return hmac.digest('base64');
-  }
-
-  /**
-   * Make authenticated request to Zadarma API
-   */
-  private async makeRequest(
-    endpoint: string,
-    params: Record<string, any> = {}
-  ): Promise<any> {
-    const url = `${this.baseUrl}${endpoint}`;
-    const signature = this.generateSignature(endpoint, params);
-    
-    const queryString = new URLSearchParams(params).toString();
-    const fullUrl = queryString ? `${url}?${queryString}` : url;
-    
-    const response = await fetch(fullUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `${this.apiKey}:${signature}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Zadarma API error: ${response.status} ${error}`);
-    }
-
-    return response.json();
-  }
-
-  /**
-   * Initiate outbound call via Zadarma API
-   */
-  async makeCall(
-    from: string,
-    to: string,
-    callbackUrl: string
-  ): Promise<CallResponse> {
-    try {
-      console.log(`[Zadarma] Initiating call from ${from} to ${to}`);
-
-      const response = await this.makeRequest('/request/callback/', {
-        from: from,
-        to: to,
-        predicted: callbackUrl
-      });
-
-      if (response.status !== 'success') {
-        throw new Error(`Zadarma call failed: ${response.message || 'Unknown error'}`);
-      }
-
-      console.log(`[Zadarma] Call initiated successfully`);
-
-      return {
-        callId: response.call_id || `zadarma-${Date.now()}`,
-        status: 'initiated'
-      };
-    } catch (error: any) {
-      console.error('[Zadarma] Call initiation error:', error.message);
-      throw new Error(`Failed to initiate Zadarma call: ${error.message}`);
+    // Auto-detect which implementation to use based on credentials
+    if ('apiKey' in creds && 'apiSecret' in creds && creds.apiKey && creds.apiSecret) {
+      console.log('[ZadarmaProvider] Using REST API implementation');
+      this.implementation = new ZadarmaRESTProvider(provider);
+    } else if ('sipUsername' in creds && 'sipPassword' in creds && creds.sipUsername && creds.sipPassword) {
+      console.log('[ZadarmaProvider] Using SIP implementation');
+      this.implementation = new ZadarmaSIPProvider(provider);
+    } else {
+      throw new Error(
+        'Zadarma provider requires either (apiKey + apiSecret) for REST API or (sipUsername + sipPassword) for SIP'
+      );
     }
   }
 
   /**
-   * Answer inbound call
+   * Initiate an outbound call
    */
-  async answerCall(
-    callId: string,
-    twimlUrl: string
-  ): Promise<void> {
-    // Zadarma handles inbound calls via webhooks
-    // No explicit answer API needed - configured in account settings
-    console.log(`[Zadarma] Inbound call ${callId} will be handled via webhook`);
+  async initiateCall(options: {
+    from: string;
+    to: string;
+    url?: string;
+    statusCallback?: string;
+    statusCallbackMethod?: string;
+    record?: boolean;
+  }): Promise<{
+    providerCallId: string;
+    status: string;
+    direction: "inbound" | "outbound";
+  }> {
+    return this.implementation.initiateCall(options);
   }
 
   /**
-   * Hangup call
+   * End an active call
    */
-  async hangupCall(callId: string): Promise<void> {
-    try {
-      await this.makeRequest('/request/hangup/', {
-        call_id: callId
-      });
-      console.log(`[Zadarma] Hung up call ${callId}`);
-    } catch (error: any) {
-      console.error(`[Zadarma] Hangup error:`, error.message);
-      throw error;
-    }
+  async endCall(callSid: string): Promise<void> {
+    return this.implementation.endCall(callSid);
   }
 
   /**
-   * Validate Zadarma webhook signature
-   * Zadarma signs webhooks with MD5(params + secret)
+   * Get call details
    */
-  static validateWebhookSignature(
-    apiSecret: string,
-    signature: string,
-    params: Record<string, any>
-  ): boolean {
-    try {
-      // Sort params and concatenate
-      const sortedParams = Object.keys(params)
-        .filter(key => key !== 'signature' && key !== 'zd_echo') // Exclude signature itself
-        .sort()
-        .map(key => `${key}${params[key]}`)
-        .join('');
-      
-      const expectedSignature = crypto
-        .createHash('md5')
-        .update(sortedParams + apiSecret)
-        .digest('hex');
-
-      return signature === expectedSignature;
-    } catch (error) {
-      console.error('[Zadarma] Signature validation error:', error);
-      return false;
-    }
+  async getCallDetails(callSid: string): Promise<any> {
+    return this.implementation.getCallDetails(callSid);
   }
 
   /**
-   * Generate ZSML (Zadarma Scenario Markup Language) for call flow
-   * Similar to TwiML but Zadarma-specific
+   * Cleanup when provider is destroyed
    */
-  static generateZSML(options: {
-    message?: string;
-    streamUrl?: string;
-    recordingEnabled?: boolean;
-  }): string {
-    const { message, streamUrl, recordingEnabled } = options;
-
-    let zsml = '<?xml version="1.0" encoding="UTF-8"?>\n<pbx>\n';
-
-    // Play greeting message if provided
-    if (message) {
-      zsml += `  <say>${message}</say>\n`;
-    }
-
-    // Enable recording if requested
-    if (recordingEnabled) {
-      zsml += '  <record/>\n';
-    }
-
-    // Add media stream for real-time audio if provided
-    if (streamUrl) {
-      // Note: Zadarma may require custom integration for real-time streaming
-      // This is a placeholder - check Zadarma docs for actual implementation
-      zsml += `  <stream url="${streamUrl}"/>\n`;
-    }
-
-    zsml += '</pbx>';
-
-    return zsml;
-  }
-
-  /**
-   * Get account balance (for monitoring)
-   */
-  async getBalance(): Promise<number> {
-    try {
-      const response = await this.makeRequest('/info/balance/');
-      return parseFloat(response.balance || '0');
-    } catch (error) {
-      console.error('[Zadarma] Failed to get balance:', error);
-      return 0;
-    }
-  }
-
-  /**
-   * Get call statistics
-   */
-  async getCallStats(callId: string): Promise<any> {
-    try {
-      const response = await this.makeRequest('/statistics/pbx/', {
-        call_id: callId
-      });
-      return response;
-    } catch (error) {
-      console.error('[Zadarma] Failed to get call stats:', error);
-      return null;
+  destroy(): void {
+    if ('destroy' in this.implementation && typeof this.implementation.destroy === 'function') {
+      this.implementation.destroy();
     }
   }
 }
