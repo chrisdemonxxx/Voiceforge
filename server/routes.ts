@@ -6,6 +6,7 @@ import { rateLimiter } from "./rate-limiter";
 import { pythonBridge } from "./python-bridge";
 import { RealTimeGateway } from "./realtime-gateway";
 import { TelephonySignaling } from "./telephony-signaling";
+import { TelephonyService } from "./services/telephony-service";
 import { generateAgentFlow } from "./services/ai-flow-generator";
 import multer from "multer";
 import { z } from "zod";
@@ -579,8 +580,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Real-Time Gateway for Voice AI Playground
   const realTimeGateway = new RealTimeGateway(httpServer, "/ws/realtime");
   
-  // Telephony Signaling for WebRTC Calls
-  const telephonySignaling = new TelephonySignaling(httpServer, "/ws/telephony");
+  // Telephony Service and Signaling for WebRTC Calls
+  const telephonyService = new TelephonyService(pythonBridge);
+  const telephonySignaling = new TelephonySignaling(httpServer, telephonyService, "/ws/telephony");
   
   // Metrics endpoint for real-time gateway
   app.get("/api/realtime/metrics", (req, res) => {
