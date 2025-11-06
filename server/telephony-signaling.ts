@@ -41,8 +41,9 @@ interface PeerConnectionState {
  */
 export class TelephonySignaling {
   private wss: WebSocketServer;
-  private connections: Map<WebSocket, PeerConnectionState> = new Map();
-  private sessionIndex: Map<string, WebSocket> = new Map();
+  private connections: Map<string, PeerConnectionState> = new Map(); // Key by sessionId
+  private wsToSession: Map<WebSocket, string> = new Map(); // Map WebSocket to sessionId
+  private sessionToApiKey: Map<string, string> = new Map(); // Map sessionId to apiKeyId
 
   constructor(httpServer: Server, path: string = "/ws/telephony") {
     this.wss = new WebSocketServer({ server: httpServer, path });
@@ -81,11 +82,27 @@ export class TelephonySignaling {
    */
   private async handleMessage(ws: WebSocket, message: SignalingMessage) {
     try {
-      switch (message.type) {
-        case "init":
-          await this.handleInit(ws, message);
-          break;
+      // Init doesn't require sessionId validation
+      if (message.type === "init") {
+        await this.handleInit(ws, message);
+        return;
+      }
 
+      // All other messages require valid sessionId
+      if (!message.sessionId) {
+        throw new Error("sessionId is required");
+      }
+
+      const sessionId = this.wsToSession.get(ws);
+      if (!sessionId) {
+        throw new Error("WebSocket not initialized. Send 'init' message first.");
+      }
+
+      if (message.sessionId !== sessionId) {
+        throw new Error("Session ID mismatch. Invalid session.");
+      }
+
+      switch (message.type) {
         case "start_call":
           await this.handleStartCall(ws, message);
           break;
@@ -138,10 +155,9 @@ export class TelephonySignaling {
     // Generate unique session ID for this WebSocket connection
     const sessionId = `ws_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
-    // Store authentication state on WebSocket
-    (ws as any).apiKeyId = apiKey.id;
-    (ws as any).sessionId = sessionId;
-    (ws as any).isAuthenticated = true;
+    // Map WebSocket to session ID and store API key
+    this.wsToSession.set(ws, sessionId);
+    this.sessionToApiKey.set(sessionId, apiKey.id);
 
     // Send acknowledgment with real session ID
     this.send(ws, {
@@ -156,13 +172,12 @@ export class TelephonySignaling {
    * Handle call initiation
    */
   private async handleStartCall(ws: WebSocket, message: SignalingMessage) {
-    // Verify authentication
-    if (!(ws as any).isAuthenticated) {
-      throw new Error("WebSocket not initialized. Send 'init' message first.");
+    const sessionId = message.sessionId!; // Validated by handleMessage
+    
+    // Check if this session already has an active call
+    if (this.connections.has(sessionId)) {
+      throw new Error("Session already has an active call");
     }
-
-    const apiKeyId = (ws as any).apiKeyId;
-    const wsSessionId = (ws as any).sessionId;
 
     if (!message.phoneNumber) {
       throw new Error("Phone number is required");
@@ -172,6 +187,12 @@ export class TelephonySignaling {
     const isValid = TelephonyService.validatePhoneNumber(message.phoneNumber);
     if (!isValid) {
       throw new Error("Invalid phone number format");
+    }
+
+    // Get API key ID from session
+    const apiKeyId = this.getApiKeyIdForSession(sessionId);
+    if (!apiKeyId) {
+      throw new Error("API key not found for session");
     }
 
     // Get active provider for this API key
@@ -184,8 +205,9 @@ export class TelephonySignaling {
     const phoneNumbers = await storage.getAllPhoneNumbers(provider.id);
     const fromNumber = phoneNumbers.find((pn: any) => pn.active)?.phoneNumber || "+10000000000";
 
-    // Create call session with telephony service
-    const session = await telephonyService.initiateCall({
+    // Initiate call through telephony service (for actual call placement)
+    // Note: We use our sessionId, not the telephonyService's internal session ID
+    await telephonyService.initiateCall({
       providerId: provider.id,
       from: fromNumber,
       to: message.phoneNumber,
@@ -203,14 +225,14 @@ export class TelephonySignaling {
       campaignId: null,
       phoneNumberId: phoneNumbers.find((pn: any) => pn.phoneNumber === fromNumber)?.id || null,
       metadata: {
-        wsSessionId,
+        sessionId,
         userAgent: "WebRTC Dialer",
       },
     });
     
-    // Store connection state
+    // Store connection state (keyed by sessionId)
     const state: PeerConnectionState = {
-      sessionId: session.id,
+      sessionId,
       callId: callRecord.id,
       ws,
       apiKeyId,
@@ -222,13 +244,12 @@ export class TelephonySignaling {
       isAuthenticated: true,
     };
 
-    this.connections.set(ws, state);
-    this.sessionIndex.set(session.id, ws);
+    this.connections.set(sessionId, state);
 
     // Send session info back to client
     this.send(ws, {
       type: "start_call",
-      sessionId: session.id,
+      sessionId,
       callId: callRecord.id,
     });
 
@@ -236,15 +257,19 @@ export class TelephonySignaling {
   }
 
   /**
+   * Helper to get API key ID for a session
+   */
+  private getApiKeyIdForSession(sessionId: string): string | undefined {
+    return this.sessionToApiKey.get(sessionId);
+  }
+
+  /**
    * Handle WebRTC offer (from client)
    */
   private async handleOffer(ws: WebSocket, message: SignalingMessage) {
-    // Verify authentication
-    if (!(ws as any).isAuthenticated) {
-      throw new Error("Not authenticated");
-    }
-
-    const state = this.connections.get(ws);
+    const sessionId = message.sessionId!; // Validated by handleMessage
+    const state = this.connections.get(sessionId);
+    
     if (!state) {
       throw new Error("No active call session. Start a call first.");
     }
@@ -261,7 +286,7 @@ export class TelephonySignaling {
 
     // For now, we'll acknowledge the offer and let the client know
     // the server is ready to exchange ICE candidates
-    console.log(`[TelephonySignaling] Received offer for session ${state.sessionId}`);
+    console.log(`[TelephonySignaling] Received offer for session ${sessionId}`);
 
     // Update activity and call status
     state.lastActivity = new Date();
@@ -270,7 +295,7 @@ export class TelephonySignaling {
     // Send acknowledgment
     this.send(ws, {
       type: "offer",
-      sessionId: state.sessionId,
+      sessionId,
     });
   }
 
@@ -278,12 +303,9 @@ export class TelephonySignaling {
    * Handle WebRTC answer (from client if server sent offer, or vice versa)
    */
   private async handleAnswer(ws: WebSocket, message: SignalingMessage) {
-    // Verify authentication
-    if (!(ws as any).isAuthenticated) {
-      throw new Error("Not authenticated");
-    }
-
-    const state = this.connections.get(ws);
+    const sessionId = message.sessionId!; // Validated by handleMessage
+    const state = this.connections.get(sessionId);
+    
     if (!state) {
       throw new Error("No active call session");
     }
@@ -292,7 +314,7 @@ export class TelephonySignaling {
       throw new Error("SDP answer is required");
     }
 
-    console.log(`[TelephonySignaling] Received answer for session ${state.sessionId}`);
+    console.log(`[TelephonySignaling] Received answer for session ${sessionId}`);
 
     // Update activity and call status
     state.lastActivity = new Date();
@@ -301,7 +323,7 @@ export class TelephonySignaling {
     // Acknowledge answer received
     this.send(ws, {
       type: "answer",
-      sessionId: state.sessionId,
+      sessionId,
     });
   }
 
@@ -309,12 +331,9 @@ export class TelephonySignaling {
    * Handle ICE candidate exchange
    */
   private async handleIceCandidate(ws: WebSocket, message: SignalingMessage) {
-    // Verify authentication
-    if (!(ws as any).isAuthenticated) {
-      throw new Error("Not authenticated");
-    }
-
-    const state = this.connections.get(ws);
+    const sessionId = message.sessionId!; // Validated by handleMessage
+    const state = this.connections.get(sessionId);
+    
     if (!state) {
       throw new Error("No active call session");
     }
@@ -325,7 +344,7 @@ export class TelephonySignaling {
 
     // In a real implementation, this would add the ICE candidate
     // to the peer connection for NAT traversal
-    console.log(`[TelephonySignaling] Received ICE candidate for session ${state.sessionId}`);
+    console.log(`[TelephonySignaling] Received ICE candidate for session ${sessionId}`);
 
     // Update activity
     state.lastActivity = new Date();
@@ -333,7 +352,7 @@ export class TelephonySignaling {
     // Acknowledge candidate received
     this.send(ws, {
       type: "ice_candidate",
-      sessionId: state.sessionId,
+      sessionId,
     });
   }
 
@@ -341,65 +360,66 @@ export class TelephonySignaling {
    * Handle call termination
    */
   private async handleEndCall(ws: WebSocket, message: SignalingMessage) {
-    // Verify authentication
-    if (!(ws as any).isAuthenticated) {
-      throw new Error("Not authenticated");
-    }
-
-    const state = this.connections.get(ws);
+    const sessionId = message.sessionId!; // Validated by handleMessage
+    const state = this.connections.get(sessionId);
+    
     if (!state) {
       throw new Error("No active call session");
     }
 
-    // End the telephony session
-    await telephonyService.endCall(state.sessionId);
-
-    // Update call record in database
-    await storage.updateCall(state.callId, {
-      status: "completed",
-      endedAt: new Date(),
-    });
+    // Update call record in database with final status
+    const currentCall = await storage.getCall(state.callId);
+    if (currentCall && !currentCall.endedAt) {
+      await storage.updateCall(state.callId, {
+        status: "completed",
+        endedAt: new Date(),
+      });
+    }
 
     // Clean up connection state
-    this.connections.delete(ws);
-    this.sessionIndex.delete(state.sessionId);
+    this.connections.delete(sessionId);
 
     // Send confirmation
     this.send(ws, {
       type: "end_call",
-      sessionId: state.sessionId,
+      sessionId,
       callId: state.callId,
     });
 
     console.log(`[TelephonySignaling] Call ended: ${state.callId}`);
-
-    // Close WebSocket
-    ws.close();
   }
 
   /**
    * Handle client disconnect
    */
   private async handleDisconnect(ws: WebSocket) {
-    const state = this.connections.get(ws);
-    if (state) {
-      console.log(`[TelephonySignaling] Client disconnected: ${state.sessionId}`);
+    const sessionId = this.wsToSession.get(ws);
+    if (!sessionId) return;
 
-      // End call if still active
+    const state = this.connections.get(sessionId);
+    if (state) {
+      console.log(`[TelephonySignaling] Client disconnected: ${sessionId}`);
+
+      // Only update call to failed if it hasn't already ended
       try {
-        await telephonyService.endCall(state.sessionId);
-        await storage.updateCall(state.callId, {
-          status: "failed",
-          endedAt: new Date(),
-        });
+        const currentCall = await storage.getCall(state.callId);
+        if (currentCall && !currentCall.endedAt) {
+          await storage.updateCall(state.callId, {
+            status: "failed",
+            endedAt: new Date(),
+          });
+        }
       } catch (error) {
         console.error("[TelephonySignaling] Error ending call on disconnect:", error);
       }
 
-      // Clean up
-      this.connections.delete(ws);
-      this.sessionIndex.delete(state.sessionId);
+      // Clean up all state
+      this.connections.delete(sessionId);
     }
+
+    // Clean up session mappings
+    this.wsToSession.delete(ws);
+    this.sessionToApiKey.delete(sessionId);
   }
 
   /**
@@ -425,9 +445,9 @@ export class TelephonySignaling {
    * Broadcast message to specific session
    */
   broadcastToSession(sessionId: string, message: any) {
-    const ws = this.sessionIndex.get(sessionId);
-    if (ws) {
-      this.send(ws, message);
+    const state = this.connections.get(sessionId);
+    if (state) {
+      this.send(state.ws, message);
     }
   }
 
@@ -442,7 +462,6 @@ export class TelephonySignaling {
    * Get session info
    */
   getSessionInfo(sessionId: string): PeerConnectionState | undefined {
-    const ws = this.sessionIndex.get(sessionId);
-    return ws ? this.connections.get(ws) : undefined;
+    return this.connections.get(sessionId);
   }
 }
