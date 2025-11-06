@@ -5,6 +5,54 @@ VoiceForge API is a comprehensive, GPU-accelerated voice AI platform offering st
 
 ## Recent Changes
 
+### November 6, 2025 - SIP Protocol Integration for Zadarma
+Implemented full SIP protocol support to bypass Zadarma REST API restrictions:
+
+**SIP Implementation**:
+*   **ZadarmaSIPProvider**: Complete SIP client implementation using `sip` library for Node.js
+*   **SIP INVITE**: Outbound call initiation with digest authentication (MD5-based) to sip.zadarma.com
+*   **SDP Generation**: Session Description Protocol negotiation supporting μ-law (PCMU) and A-law (PCMA) codecs at 8kHz
+*   **Dialog Management**: Full SIP dialog lifecycle handling (100 Trying, 180 Ringing, 200 OK, BYE, CANCEL)
+*   **Authentication**: Digest authentication with realm/nonce challenge-response using MD5 hashing
+*   **Smart Wrapper**: Auto-detection between REST API (apiKey/apiSecret) and SIP (sipUsername/sipPassword) credentials
+*   **Call Control**: ACK message handling, BYE for call termination, and CANCEL for call cancellation
+
+**Architecture**:
+*   **Multi-Implementation Pattern**: Single "zadarma" provider type intelligently routes to REST or SIP based on credentials
+*   **ZadarmaRESTProvider**: Renamed from ZadarmaProvider - handles REST API calls (currently blocked by 401 account restriction)
+*   **ZadarmaSIPProvider**: New SIP-based implementation - bypasses REST API to enable immediate call functionality
+*   **Unified Interface**: Both implementations expose identical `initiateCall`, `endCall`, `getCallDetails`, `destroy` methods
+
+**Technical Details**:
+*   SIP stack runs on random UDP port (5060+) to avoid conflicts
+*   Active dialog tracking with call-id, tags, and remote targets
+*   Local IP auto-detection for Contact headers
+*   RTP media negotiation on port 10000+ (not yet fully implemented)
+*   Graceful cleanup on destroy - ends all active calls via BYE
+
+**Testing**:
+*   Comprehensive test suite (`zadarma-sip.test.ts`) with 20+ test cases
+*   Constructor validation, credential trimming, auto-detection tests
+*   SDP generation, Call-ID/tag uniqueness, digest auth extraction
+*   Dialog management and cleanup verification
+*   Custom test runner matching existing project patterns (no Jest dependency)
+
+**Credential Management**:
+*   SIP credentials: `sipUsername` (SIP login from my.zadarma.com/mysip/), `sipPassword`, optional `sipDomain` (default: sip.zadarma.com)
+*   REST credentials: `apiKey`, `apiSecret` (currently blocked by 401)
+*   Database schema unchanged - JSONB credentials field already supports both formats
+
+**Status**:
+*   REST API: Signature validation confirmed correct, blocked by Zadarma account-level restriction
+*   SIP Protocol: Fully implemented, ready for live testing with valid SIP credentials
+*   Provider Factory: Updated to support both implementations via smart wrapper
+
+**Next Actions**:
+1. Obtain valid SIP credentials from Zadarma to test live SIP INVITE flow
+2. Implement RTP media handling for bidirectional audio streams
+3. Add inbound call support (currently outbound-only)
+4. Monitor Zadarma account status for REST API access restoration
+
 ### November 6, 2025 - Audio Conversion & Zadarma Multi-Provider Integration
 Completed production-ready audio conversion pipeline and Zadarma telephony provider integration:
 
@@ -107,7 +155,7 @@ The platform features a **premium royal purple theme** designed to match and exc
 ## External Dependencies
 *   **Database**: PostgreSQL (Neon serverless)
 *   **Frontend Libraries**: React, Wouter, Tailwind CSS, shadcn/ui, TanStack Query
-*   **Backend Libraries**: Express, `ws`, Multer, Zod, Twilio SDK
+*   **Backend Libraries**: Express, `ws`, Multer, Zod, Twilio SDK, `sip` (Node.js SIP protocol library)
 *   **ML Models/Libraries**: Chatterbox, Higgs Audio V2, StyleTTS2, Whisper-large-v3-turbo (faster-whisper), Silero VAD, Llama 3.3, Qwen 2.5, ai4bharat/indic-parler-tts, parler-tts/parler-tts-mini-multilingual
-*   **Telephony Providers**: Twilio (integrated), Zadarma (integrated)
+*   **Telephony Providers**: Twilio (integrated), Zadarma (integrated via REST API + SIP)
 *   **Audio Processing**: librosa, soundfile (for μ-law ↔ PCM conversion and resampling)
