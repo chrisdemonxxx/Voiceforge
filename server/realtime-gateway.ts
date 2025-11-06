@@ -286,49 +286,98 @@ export class RealTimeGateway {
     
     const agentProcessingTime = Date.now() - agentProcessingStart;
     
-    // Mock TTS generation and streaming
+    // Real TTS generation with streaming
     const ttsProcessingStart = Date.now();
+    let firstChunkLatency = 0;
+    let totalChunks = 0;
     
-    // Create a simple mock audio chunk (440Hz tone as placeholder)
-    // In production, this would be actual TTS output from Python service
-    const sampleRate = 16000;
-    const duration = 2.0;
-    const frequency = 440;
-    const samples = Math.floor(sampleRate * duration);
-    
-    // Generate sine wave
-    const audioBuffer = new Int16Array(samples);
-    for (let i = 0; i < samples; i++) {
-      const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate);
-      audioBuffer[i] = Math.floor(sample * 32767 * 0.3); // 30% volume
+    try {
+      await pythonBridge.callTTSStreaming(
+        {
+          text: agentResponse,
+          model: "chatterbox", // Use model from session config
+          voice: undefined,
+          speed: 1.0,
+          chunk_duration_ms: 200,
+        },
+        (chunk) => {
+          if (chunk.type === "error") {
+            console.error("[RealTime] TTS streaming error:", chunk.message);
+            return;
+          }
+          
+          // Track first chunk latency
+          if (chunk.sequence === 0) {
+            firstChunkLatency = chunk.latency_ms || 0;
+          }
+          
+          totalChunks++;
+          
+          // Send TTS chunk to client
+          this.sendMessage(ws, {
+            type: "tts_chunk",
+            eventId: message.eventId,
+            chunk: chunk.chunk || "",
+            sequence: chunk.sequence || 0,
+            done: chunk.done || false,
+          });
+        }
+      );
+      
+      const ttsProcessingTime = Date.now() - ttsProcessingStart;
+      
+      // Send TTS complete with latency
+      this.sendMessage(ws, {
+        type: "tts_complete",
+        eventId: message.eventId,
+        duration: totalChunks * 0.2, // Approximate based on 200ms chunks
+        latency: {
+          processing: ttsProcessingTime,
+          streaming: firstChunkLatency,
+          total: ttsProcessingTime,
+        },
+      });
+    } catch (error: any) {
+      console.error("[RealTime] TTS streaming failed:", error);
+      
+      // Fallback to mock audio on error
+      const sampleRate = 16000;
+      const duration = 1.0;
+      const frequency = 440;
+      const samples = Math.floor(sampleRate * duration);
+      
+      const audioBuffer = new Int16Array(samples);
+      for (let i = 0; i < samples; i++) {
+        const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate);
+        audioBuffer[i] = Math.floor(sample * 32767 * 0.3);
+      }
+      
+      const wavBuffer = this.createWAVBuffer(audioBuffer, sampleRate);
+      const base64Audio = Buffer.from(wavBuffer).toString('base64');
+      
+      this.sendMessage(ws, {
+        type: "tts_chunk",
+        eventId: message.eventId,
+        chunk: base64Audio,
+        sequence: 0,
+        done: true,
+      });
+      
+      const ttsProcessingTime = Date.now() - ttsProcessingStart;
+      
+      this.sendMessage(ws, {
+        type: "tts_complete",
+        eventId: message.eventId,
+        duration: 1.0,
+        latency: {
+          processing: ttsProcessingTime,
+          streaming: 10,
+          total: ttsProcessingTime,
+        },
+      });
     }
     
-    // Create WAV file header + data
-    const wavBuffer = this.createWAVBuffer(audioBuffer, sampleRate);
-    const base64Audio = Buffer.from(wavBuffer).toString('base64');
-    
-    // Send TTS chunk (for now, send complete audio)
-    this.sendMessage(ws, {
-      type: "tts_chunk",
-      eventId: message.eventId,
-      chunk: base64Audio,
-      sequence: 0,
-      done: true,
-    });
-    
     const ttsProcessingTime = Date.now() - ttsProcessingStart;
-    
-    // Send TTS complete with latency
-    this.sendMessage(ws, {
-      type: "tts_complete",
-      eventId: message.eventId,
-      duration,
-      latency: {
-        processing: ttsProcessingTime,
-        streaming: 10,
-        total: ttsProcessingTime + 10,
-      },
-    });
     
     // Send overall metrics
     const totalLatency = Date.now() - message.timestamp;

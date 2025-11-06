@@ -22,6 +22,32 @@ interface TTSResponse {
   message?: string;
 }
 
+interface TTSStreamingRequest {
+  text: string;
+  model: string;
+  voice?: string;
+  speed?: number;
+  chunk_duration_ms?: number;
+  reference_audio?: string;
+}
+
+interface TTSChunkResponse {
+  type: "tts_chunk" | "error";
+  status: "success" | "error";
+  chunk?: string;  // base64 encoded audio chunk
+  sequence?: number;
+  done?: boolean;
+  latency_ms?: number;
+  model_info?: {
+    model: string;
+    quality: number;
+    sample_rate: number;
+    emotional_range: string;
+  };
+  duration_ms?: number;
+  message?: string;
+}
+
 interface STTChunkRequest {
   chunk: string;  // base64 encoded PCM16
   sequence: number;
@@ -377,6 +403,73 @@ export class PythonBridge {
       console.error("[PythonBridge] TTS pool error, falling back to spawn:", error);
       return this.callTTSSpawn(request);
     }
+  }
+  
+  async callTTSStreaming(
+    request: TTSStreamingRequest,
+    onChunk: (chunk: TTSChunkResponse) => void
+  ): Promise<void> {
+    const scriptPath = path.join(__dirname, "ml-services", "tts_streaming.py");
+    
+    return new Promise((resolve, reject) => {
+      const python = spawn(this.pythonPath, [scriptPath]);
+      
+      let outputBuffer = "";
+      
+      if (!python.stdout || !python.stdin || !python.stderr) {
+        reject(new Error("Failed to create streaming TTS process streams"));
+        return;
+      }
+      
+      // Handle stdout - parse JSON chunks
+      python.stdout.on("data", (data) => {
+        outputBuffer += data.toString();
+        
+        // Process complete JSON messages
+        const lines = outputBuffer.split("\n");
+        outputBuffer = lines.pop() || "";
+        
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          
+          try {
+            const chunk: TTSChunkResponse = JSON.parse(line);
+            onChunk(chunk);
+          } catch (error) {
+            console.error("[PythonBridge] Failed to parse TTS chunk:", line, error);
+          }
+        }
+      });
+      
+      // Handle stderr - log messages
+      python.stderr.on("data", (data) => {
+        const message = data.toString().trim();
+        if (message) {
+          console.log(`[TTS Streaming]`, message);
+        }
+      });
+      
+      // Handle process completion
+      python.on("close", (code) => {
+        if (code !== 0) {
+          reject(new Error(`TTS streaming process exited with code ${code}`));
+          return;
+        }
+        resolve();
+      });
+      
+      python.on("error", (error) => {
+        reject(new Error(`Failed to spawn TTS streaming process: ${error.message}`));
+      });
+      
+      // Send request with streaming enabled
+      const streamingRequest = {
+        ...request,
+        streaming: true,
+      };
+      python.stdin.write(JSON.stringify(streamingRequest) + "\n");
+      python.stdin.end();
+    });
   }
   
   private async callTTSSpawn(request: TTSRequest): Promise<Buffer> {
