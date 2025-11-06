@@ -407,6 +407,11 @@ export class PythonBridge {
   }
   
   async callTTS(request: TTSRequest): Promise<Buffer> {
+    // If using Hugging Face Indic Parler TTS model, route to HF service
+    if (request.model === "indic-parler-tts") {
+      return this.callHuggingFaceTTS(request);
+    }
+    
     if (!this.ttsPool) {
       // Fallback to spawn mode if pool not initialized
       return this.callTTSSpawn(request);
@@ -426,6 +431,90 @@ export class PythonBridge {
       console.error("[PythonBridge] TTS pool error, falling back to spawn:", error);
       return this.callTTSSpawn(request);
     }
+  }
+  
+  private async callHuggingFaceTTS(request: TTSRequest): Promise<Buffer> {
+    const scriptPath = path.join(__dirname, "ml-services", "huggingface_tts_service.py");
+    
+    return new Promise(async (resolve, reject) => {
+      const python = spawn(this.pythonPath, [scriptPath]);
+      
+      let stdoutData = "";
+      let stderrData = "";
+
+      if (!python.stdout || !python.stdin || !python.stderr) {
+        reject(new Error("Failed to create Hugging Face TTS process streams"));
+        return;
+      }
+
+      python.stdout.on("data", (data) => {
+        stdoutData += data.toString();
+      });
+
+      python.stderr.on("data", (data) => {
+        stderrData += data.toString();
+      });
+
+      python.on("close", (code) => {
+        if (code !== 0) {
+          reject(new Error(`HF TTS process exited with code ${code}: ${stderrData}`));
+          return;
+        }
+
+        try {
+          const response: TTSResponse = JSON.parse(stdoutData);
+          
+          if (response.status === "error") {
+            reject(new Error(`HF TTS error: ${response.message}`));
+            return;
+          }
+
+          if (!response.audio) {
+            reject(new Error("No audio data in HF TTS response"));
+            return;
+          }
+
+          // Decode base64 audio
+          const audioBuffer = Buffer.from(response.audio, "base64");
+          resolve(audioBuffer);
+        } catch (error) {
+          reject(new Error(`Failed to parse HF TTS response: ${error}`));
+        }
+      });
+
+      python.on("error", (error) => {
+        reject(new Error(`Failed to spawn HF TTS process: ${error.message}`));
+      });
+
+      // Look up voice from voice library
+      let voicePrompt = "Speaks in a clear and expressive voice";
+      let language = "Hindi";
+      
+      if (request.voice) {
+        try {
+          // Import voice library dynamically
+          const { VOICE_LIBRARY } = await import("../client/src/lib/constants.js");
+          const voice = VOICE_LIBRARY.find((v: any) => v.id === request.voice);
+          
+          if (voice) {
+            voicePrompt = voice.prompt;
+            language = voice.language;
+          }
+        } catch (error) {
+          console.warn("[HF TTS] Failed to load voice library, using defaults:", error);
+        }
+      }
+
+      // Prepare request for Hugging Face service
+      const hfRequest = {
+        text: request.text,
+        voice_prompt: voicePrompt,
+        language: language,
+      };
+
+      python.stdin.write(JSON.stringify(hfRequest) + "\n");
+      python.stdin.end();
+    });
   }
   
   async callTTSStreaming(
