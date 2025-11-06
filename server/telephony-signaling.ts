@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { v4 as uuidv4 } from "uuid";
 import { storage } from "./storage";
-import { telephonyService, TelephonyService } from "./services/telephony-service";
+import { TelephonyService } from "./services/telephony-service";
 
 /**
  * WebRTC Signaling Message Types
@@ -44,9 +44,11 @@ export class TelephonySignaling {
   private connections: Map<string, PeerConnectionState> = new Map(); // Key by sessionId
   private wsToSession: Map<WebSocket, string> = new Map(); // Map WebSocket to sessionId
   private sessionToApiKey: Map<string, string> = new Map(); // Map sessionId to apiKeyId
+  private telephonyService: TelephonyService;
 
-  constructor(httpServer: Server, path: string = "/ws/telephony") {
+  constructor(httpServer: Server, telephonyService: TelephonyService, path: string = "/ws/telephony") {
     this.wss = new WebSocketServer({ server: httpServer, path });
+    this.telephonyService = telephonyService;
     this.setupWebSocketServer();
   }
 
@@ -207,7 +209,7 @@ export class TelephonySignaling {
 
     // Initiate call through telephony service (for actual call placement)
     // Note: We use our sessionId, not the telephonyService's internal session ID
-    await telephonyService.initiateCall({
+    await this.telephonyService.initiateCall({
       providerId: provider.id,
       from: fromNumber,
       to: message.phoneNumber,
