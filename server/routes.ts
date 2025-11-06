@@ -19,6 +19,24 @@ const upload = multer({ storage: multer.memoryStorage() });
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   
+  // Initialize database with default API key if none exist
+  console.log("[Server] Checking database initialization...");
+  try {
+    const existingKeys = await storage.getAllApiKeys();
+    if (existingKeys.length === 0) {
+      console.log("[Server] No API keys found. Creating default API key...");
+      const defaultKey = await storage.createApiKey({
+        name: "Default API Key",
+        rateLimit: 1000,
+      });
+      console.log(`[Server] Created default API key: ${defaultKey.key}`);
+    } else {
+      console.log(`[Server] Found ${existingKeys.length} existing API key(s)`);
+    }
+  } catch (error) {
+    console.error("[Server] Failed to initialize database:", error);
+  }
+  
   // Initialize Python worker pools
   console.log("[Server] Initializing Python worker pools...");
   try {
