@@ -1,24 +1,30 @@
 import type { TelephonyProvider } from "@shared/schema";
 import { TwilioProvider } from "./twilio-provider";
+import { ZadarmaProvider } from "./zadarma-provider";
+
+/**
+ * Union type for all supported telephony providers
+ */
+export type AnyTelephonyProvider = TwilioProvider | ZadarmaProvider;
 
 /**
  * Provider Factory
  * Creates the appropriate telephony provider instance based on provider type
  */
 export class ProviderFactory {
-  private static providerCache = new Map<string, TwilioProvider>();
+  private static providerCache = new Map<string, AnyTelephonyProvider>();
 
   /**
    * Get or create a provider instance
    */
-  static getProvider(provider: TelephonyProvider): TwilioProvider {
+  static getProvider(provider: TelephonyProvider): AnyTelephonyProvider {
     // Check cache first
     if (this.providerCache.has(provider.id)) {
       return this.providerCache.get(provider.id)!;
     }
 
     // Create new provider instance based on provider type
-    let providerInstance: TwilioProvider;
+    let providerInstance: AnyTelephonyProvider;
 
     switch (provider.provider) {
       case "twilio":
@@ -30,8 +36,8 @@ export class ProviderFactory {
         throw new Error("Telnyx provider not yet implemented");
       
       case "zadarma":
-        // TODO: Implement ZadarmaProvider
-        throw new Error("Zadarma provider not yet implemented");
+        providerInstance = new ZadarmaProvider(provider);
+        break;
       
       case "custom":
         // TODO: Implement OpenSourceProvider (Asterisk/PJSIP)
