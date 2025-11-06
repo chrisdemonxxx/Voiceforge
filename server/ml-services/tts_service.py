@@ -21,6 +21,8 @@ import sys
 import json
 import base64
 import numpy as np
+import wave
+import io
 from typing import Dict, Any
 
 class TTSService:
@@ -32,6 +34,28 @@ class TTSService:
         # self.styletts2 = StyleTTS2.from_pretrained(device="cuda")
         print("TTS Service initialized (placeholder)", file=sys.stderr)
     
+    def generate_wav_header(self, audio_data: bytes, sample_rate: int = 22050, num_channels: int = 1) -> bytes:
+        """Generate WAV file header for audio data"""
+        bytes_per_sample = 2
+        data_size = len(audio_data)
+        
+        header = io.BytesIO()
+        header.write(b'RIFF')
+        header.write((36 + data_size).to_bytes(4, 'little'))
+        header.write(b'WAVE')
+        header.write(b'fmt ')
+        header.write((16).to_bytes(4, 'little'))
+        header.write((1).to_bytes(2, 'little'))  # PCM
+        header.write(num_channels.to_bytes(2, 'little'))
+        header.write(sample_rate.to_bytes(4, 'little'))
+        header.write((sample_rate * num_channels * bytes_per_sample).to_bytes(4, 'little'))
+        header.write((num_channels * bytes_per_sample).to_bytes(2, 'little'))
+        header.write((bytes_per_sample * 8).to_bytes(2, 'little'))
+        header.write(b'data')
+        header.write(data_size.to_bytes(4, 'little'))
+        
+        return header.getvalue() + audio_data
+
     def synthesize(self, text: str, model: str, voice: str = None, speed: float = 1.0) -> bytes:
         """
         Synthesize speech from text
@@ -43,27 +67,60 @@ class TTSService:
             speed: Speech speed (0.5 to 2.0)
         
         Returns:
-            Audio data as bytes (WAV format)
+            Audio data as bytes (WAV format with header)
         """
-        # Placeholder: Generate mock audio
-        # In production, this would call the actual TTS model
+        # Generate realistic speech-like audio wave
+        # This demonstrates the Python-Node.js bridge working
+        # In production, replace with actual TTS models:
+        # - Chatterbox: self.chatterbox.generate(text, voice=voice, speed=speed)
+        # - Higgs Audio V2: self.higgs.generate(text, voice=voice, speed=speed)
+        # - StyleTTS2: self.styletts2.generate(text, voice=voice)
         
-        if model == "chatterbox":
-            # audio = self.chatterbox.generate(text, voice=voice, speed=speed)
-            pass
-        elif model == "higgs_audio_v2":
-            # audio = self.higgs.generate(text, voice=voice, speed=speed)
-            pass
-        elif model == "styletts2":
-            # audio = self.styletts2.generate(text, voice=voice)
-            pass
-        
-        # Mock audio data (silence)
         sample_rate = 22050
-        duration = len(text.split()) * 0.5  # Rough estimate
-        audio_data = np.zeros(int(sample_rate * duration), dtype=np.int16)
+        duration = max(1.0, len(text.split()) * 0.3)  # ~3.3 words per second
+        num_samples = int(sample_rate * duration)
         
-        return audio_data.tobytes()
+        # Generate speech-like formant synthesis
+        t = np.linspace(0, duration, num_samples)
+        
+        # Fundamental frequency varies (makes it sound more natural)
+        f0_base = 150 if voice and 'male' in voice.lower() else 220
+        f0 = f0_base + 20 * np.sin(2 * np.pi * 3 * t)  # Pitch variation
+        
+        # Generate formants (speech resonances)
+        formant1 = np.sin(2 * np.pi * f0 * t)
+        formant2 = 0.5 * np.sin(2 * np.pi * f0 * 2.5 * t)
+        formant3 = 0.25 * np.sin(2 * np.pi * f0 * 4 * t)
+        
+        # Combine formants
+        audio = formant1 + formant2 + formant3
+        
+        # Add amplitude envelope (fade in/out)
+        envelope = np.ones_like(audio)
+        fade_samples = int(sample_rate * 0.05)
+        envelope[:fade_samples] = np.linspace(0, 1, fade_samples)
+        envelope[-fade_samples:] = np.linspace(1, 0, fade_samples)
+        audio *= envelope
+        
+        # Add subtle speech-like modulation
+        modulation = 1.0 + 0.1 * np.sin(2 * np.pi * 8 * t)
+        audio *= modulation
+        
+        # Adjust speed
+        if speed != 1.0:
+            new_length = int(len(audio) / speed)
+            audio = np.interp(
+                np.linspace(0, len(audio) - 1, new_length),
+                np.arange(len(audio)),
+                audio
+            )
+        
+        # Normalize and convert to 16-bit PCM
+        audio = np.clip(audio * 0.3, -1, 1)
+        audio_data = (audio * 32767).astype(np.int16)
+        
+        # Return WAV file with header
+        return self.generate_wav_header(audio_data.tobytes(), sample_rate)
 
 def main():
     """Main entry point for TTS service"""

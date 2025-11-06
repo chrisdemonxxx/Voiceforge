@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { rateLimiter } from "./rate-limiter";
+import { pythonBridge } from "./python-bridge";
 import multer from "multer";
 import { z } from "zod";
 import {
@@ -91,48 +92,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // TTS Endpoint (used by both dashboard and landing page demo)
   app.post("/api/tts", authenticateApiKey, async (req, res) => {
     try {
+      const startTime = Date.now();
       const data = ttsRequestSchema.parse(req.body);
       
-      // Generate valid WAV audio with audible 440Hz tone (A note)
-      const sampleRate = 22050;
-      const duration = 1.5;
-      const frequency = 440; // A4 note
-      const numChannels = 1;
-      const bytesPerSample = 2;
-      const numSamples = Math.floor(sampleRate * duration);
-      const dataSize = numSamples * numChannels * bytesPerSample;
+      // Call Python TTS service with formant synthesis
+      const audioBuffer = await pythonBridge.callTTS({
+        text: data.text,
+        model: data.model,
+        voice: data.voice,
+        speed: data.speed,
+      });
       
-      // WAV header
-      const header = Buffer.alloc(44);
-      header.write("RIFF", 0);
-      header.writeUInt32LE(36 + dataSize, 4);
-      header.write("WAVE", 8);
-      header.write("fmt ", 12);
-      header.writeUInt32LE(16, 16);
-      header.writeUInt16LE(1, 20);
-      header.writeUInt16LE(numChannels, 22);
-      header.writeUInt32LE(sampleRate, 24);
-      header.writeUInt32LE(sampleRate * numChannels * bytesPerSample, 28);
-      header.writeUInt16LE(numChannels * bytesPerSample, 32);
-      header.writeUInt16LE(bytesPerSample * 8, 34);
-      header.write("data", 36);
-      header.writeUInt32LE(dataSize, 40);
-      
-      // Generate sine wave tone so demo is audible
-      const audioData = Buffer.alloc(dataSize);
-      for (let i = 0; i < numSamples; i++) {
-        // Fade in/out envelope to prevent clicks
-        const envelope = i < sampleRate * 0.1 ? i / (sampleRate * 0.1) :
-                        i > numSamples - sampleRate * 0.1 ? (numSamples - i) / (sampleRate * 0.1) : 1;
-        const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate) * 0.3 * envelope;
-        const value = Math.floor(sample * 32767);
-        audioData.writeInt16LE(value, i * 2);
-      }
-      
-      const audioBuffer = Buffer.concat([header, audioData]);
+      const processingTime = Date.now() - startTime;
       
       res.setHeader("Content-Type", "audio/wav");
-      res.setHeader("X-Processing-Time", "187ms");
+      res.setHeader("X-Processing-Time", `${processingTime}ms`);
       res.send(audioBuffer);
     } catch (error: any) {
       if (error instanceof z.ZodError) {

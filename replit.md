@@ -115,18 +115,33 @@ The application will be available at the configured port. The start application 
 - `SESSION_SECRET` - Session encryption key (auto-configured)
 
 ## Recent Changes
+- **2025-11-06**: Production features completed
+  - **Task 1**: Migrated to PostgreSQL with Drizzle ORM for persistent storage
+    - Atomic usage tracking with SQL increments (no race conditions)
+    - API keys and usage persist across restarts
+    - Database seeded with demo keys
+  - **Task 2**: Implemented rate limiting and quota management
+    - Sliding window algorithm (hourly limits per API key)
+    - Tier-based limits: Public demo (100/hr), Development (1000/hr), Production (5000/hr)
+    - Standard X-RateLimit-* headers on all responses
+    - 429 status with reset time when limit exceeded
+    - E2e tested and production-ready
+
 - **2025-01-06**: Initial implementation
   - Complete frontend with landing page and dashboard
   - Backend API with all endpoints
   - Python ML service stubs for TTS, STT, VAD
   - WebSocket support for real-time streaming
   - API key management and authentication
-  - In-memory storage for development
 
 ## Architecture Decisions
 
-### Why In-Memory Storage?
-Using MemStorage for MVP to enable rapid development and testing. Can be easily swapped for PostgreSQL when needed by implementing the IStorage interface.
+### Database Architecture
+Using PostgreSQL with Drizzle ORM for production-grade persistence:
+- API keys with usage tracking and rate limits
+- Atomic SQL operations prevent race conditions
+- Row-level verification ensures data integrity
+- Neon serverless backend for scalability
 
 ### Why Python ML Services?
 The best open-source voice models (Chatterbox, Whisper, Silero) are Python-based. The current implementation uses placeholder Python scripts that can be replaced with actual model implementations when GPU infrastructure is available.
