@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
+import { rateLimiter } from "./rate-limiter";
 import multer from "multer";
 import { z } from "zod";
 import {
@@ -16,7 +17,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
 
-  // API Key Authentication Middleware
+  // API Key Authentication Middleware with Rate Limiting
   const authenticateApiKey = async (req: any, res: any, next: any) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -28,6 +29,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     if (!key || !key.active) {
       return res.status(401).json({ error: "Invalid or inactive API key" });
+    }
+
+    // Check rate limit
+    const rateLimitResult = rateLimiter.check(key);
+    
+    // Add rate limit headers to response
+    res.setHeader("X-RateLimit-Limit", rateLimitResult.limit.toString());
+    res.setHeader("X-RateLimit-Remaining", rateLimitResult.remaining.toString());
+    res.setHeader("X-RateLimit-Reset", new Date(rateLimitResult.resetTime).toISOString());
+
+    if (!rateLimitResult.allowed) {
+      return res.status(429).json({ 
+        error: "Rate limit exceeded",
+        limit: rateLimitResult.limit,
+        resetTime: new Date(rateLimitResult.resetTime).toISOString(),
+      });
     }
 
     await storage.incrementApiKeyUsage(key.id);
