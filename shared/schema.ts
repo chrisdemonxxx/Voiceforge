@@ -11,6 +11,7 @@ export const apiKeys = pgTable("api_keys", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   usage: integer("usage").default(0).notNull(),
   active: boolean("active").default(true).notNull(),
+  rateLimit: integer("rate_limit").default(1000).notNull(), // requests per hour
 });
 
 export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
