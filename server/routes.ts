@@ -58,6 +58,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 
+  // Admin Authentication Middleware for API Key Management
+  // In production, set ADMIN_TOKEN environment variable for security
+  const authenticateAdmin = async (req: any, res: any, next: any) => {
+    const adminToken = process.env.ADMIN_TOKEN;
+    
+    // In development mode (no admin token set), allow unrestricted access
+    if (!adminToken) {
+      console.warn("[Security] No ADMIN_TOKEN set - API key management is unprotected. Set ADMIN_TOKEN for production.");
+      return next();
+    }
+    
+    // In production mode, require admin token in Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Admin authentication required" });
+    }
+    
+    const token = authHeader.substring(7);
+    if (token !== adminToken) {
+      return res.status(403).json({ error: "Invalid admin token" });
+    }
+    
+    next();
+  };
+
   // API Key Authentication Middleware with Rate Limiting
   const authenticateApiKey = async (req: any, res: any, next: any) => {
     const authHeader = req.headers.authorization;
@@ -93,8 +118,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     next();
   };
 
-  // API Key Management Routes
-  app.get("/api/keys", async (req, res) => {
+  // API Key Management Routes (Protected with admin authentication)
+  app.get("/api/keys", authenticateAdmin, async (req, res) => {
     try {
       const keys = await storage.getAllApiKeys();
       res.json(keys);
@@ -103,7 +128,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/keys", async (req, res) => {
+  app.post("/api/keys", authenticateAdmin, async (req, res) => {
     try {
       const data = insertApiKeySchema.parse(req.body);
       const apiKey = await storage.createApiKey(data);
@@ -117,7 +142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/keys/:id", async (req, res) => {
+  app.delete("/api/keys/:id", authenticateAdmin, async (req, res) => {
     try {
       const success = await storage.deleteApiKey(req.params.id);
       if (!success) {
@@ -130,7 +155,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update API key (toggle active status)
-  app.patch("/api/keys/:id", async (req, res) => {
+  app.patch("/api/keys/:id", authenticateAdmin, async (req, res) => {
     try {
       const { active } = req.body;
       
