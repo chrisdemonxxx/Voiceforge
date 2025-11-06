@@ -5,6 +5,37 @@ VoiceForge API is a comprehensive, GPU-accelerated voice AI platform offering st
 
 ## Recent Changes
 
+### November 6, 2025 - Audio Conversion & Zadarma Multi-Provider Integration
+Completed production-ready audio conversion pipeline and Zadarma telephony provider integration:
+
+**Audio Conversion Pipeline**:
+*   **μ-law ↔ PCM Conversion**: Full bidirectional audio conversion in Python (`audio_converter.py`) with librosa-based 8kHz ↔ 16kHz resampling
+*   **TypeScript Bridge**: Async audio conversion bridge (`audio-converter-bridge.ts`) with 5s timeout and graceful fallback
+*   **Twilio Integration**: Real-time audio conversion in Twilio media WebSocket handler for ML pipeline compatibility
+*   **Fallback Strategy**: System continues processing even if Python worker fails - ensures call reliability
+
+**Zadarma Provider Integration**:
+*   **Full API Implementation**: Complete Zadarma provider with outbound calls, hangup, balance retrieval, and call statistics
+*   **Webhook Security**: MD5 signature validation for webhook authenticity (sorted params + secret)
+*   **ZSML Generation**: Zadarma-specific call control markup (equivalent to TwiML) with say/record/stream support
+*   **Multi-Provider Architecture**: Updated ProviderFactory to support both Twilio and Zadarma with unified interface
+
+**Testing Infrastructure**:
+*   **Integration Tests**: Comprehensive webhook signature validation tests for both Twilio (HMAC-SHA1) and Zadarma (MD5)
+*   **E2E Test Runner**: Standalone test suite (`zadarma-e2e.test.ts`) with conditional live API testing
+*   **Credentials-Optional**: Tests run signature validation and ZSML generation without API credentials
+
+**Architecture Decisions**:
+*   Audio conversion runs in separate Python process for efficiency and GPU model compatibility
+*   Sequential response handling in TypeScript bridge prevents race conditions
+*   Provider abstraction layer enables seamless multi-provider support
+*   Test runner operates without Jest dependency for faster execution
+
+**Next Actions**:
+1. Add automated regression tests for audio conversion fidelity
+2. Document operational runbooks for Python dependency management
+3. Run Zadarma live-call E2E tests once credentials are provided
+
 ### November 6, 2025 - Production-Ready Twilio Telephony Integration
 Completed comprehensive Twilio telephony implementation with all production-critical fixes architect-approved:
 
@@ -60,7 +91,7 @@ The platform features a **premium royal purple theme** designed to match and exc
 *   **Agent Flow Builder**: Visual graph-based editor with AI-powered creation for complex voice AI workflows using 5 node types (Subagent, Tool, Agent Transfer, Phone Transfer, End Call).
 *   **Real-Time Testing Playground**: Comprehensive testing interface for voice AI pipelines with WebSocket gateway, microphone integration, and real-time metrics.
 *   **Platform Features**: API key management, usage tracking, real-time WebSocket streaming, usage analytics, rate limiting, authentication, and multi-format audio conversion.
-*   **Telephony System**: Multi-provider telephony integration with Twilio fully integrated for call initiation, TwiML generation, status webhooks, and recording support, built on a provider abstraction layer.
+*   **Telephony System**: Multi-provider telephony integration with **Twilio** and **Zadarma** fully integrated for call initiation, webhook handling, media streaming, and recording support. Features production-ready audio conversion pipeline (μ-law ↔ PCM, 8kHz ↔ 16kHz) for ML pipeline compatibility.
 
 ### System Design Choices
 *   **Database Architecture**: PostgreSQL with Drizzle ORM and Neon serverless for production-grade persistence and scalability, with auto-seeding of API keys.
@@ -78,4 +109,5 @@ The platform features a **premium royal purple theme** designed to match and exc
 *   **Frontend Libraries**: React, Wouter, Tailwind CSS, shadcn/ui, TanStack Query
 *   **Backend Libraries**: Express, `ws`, Multer, Zod, Twilio SDK
 *   **ML Models/Libraries**: Chatterbox, Higgs Audio V2, StyleTTS2, Whisper-large-v3-turbo (faster-whisper), Silero VAD, Llama 3.3, Qwen 2.5, ai4bharat/indic-parler-tts, parler-tts/parler-tts-mini-multilingual
-*   **Telephony Providers**: Twilio (integrated)
+*   **Telephony Providers**: Twilio (integrated), Zadarma (integrated)
+*   **Audio Processing**: librosa, soundfile (for μ-law ↔ PCM conversion and resampling)
