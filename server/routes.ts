@@ -1307,24 +1307,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const payload = message.media.payload;
             const audioChunk = Buffer.from(payload, 'base64');
             
-            // NOTE: Twilio audio format is 8kHz μ-law, but Whisper STT expects 16kHz PCM
-            // TODO: Add audio format conversion (μ-law → PCM + resample 8kHz → 16kHz)
-            // Options:
-            //   1. Convert in Node.js using audio processing library (e.g., sox-audio, node-opus)
-            //   2. Update Python STT service to handle Twilio format directly (preferred)
-            // For production, implement option 2 in stt_service.py with librosa/scipy resampling
-            
-            // Buffer audio for processing
-            audioBuffer.push(audioChunk);
-            
-            // Send audio to telephony service for processing
-            // Will need format conversion before STT can process correctly
-            await telephonyService.processAudioChunk(sessionId, audioChunk);
-            
-            // TODO: Implement bidirectional audio
-            // 1. Get synthesized response from ML pipeline (STT → VLLM → TTS)
-            // 2. Convert PCM response to μ-law at 8kHz
-            // 3. Send back to Twilio using media 'mark' and 'media' events
+            // Convert μ-law 8kHz → PCM 16kHz for ML processing
+            try {
+              const { getAudioConverter } = await import("./services/audio-converter-bridge");
+              const converter = await getAudioConverter();
+              const pcm16k = await converter.convertTelephonyToML(audioChunk);
+              
+              // Buffer converted audio
+              audioBuffer.push(pcm16k);
+              
+              // Send converted audio to telephony service for ML processing
+              await telephonyService.processAudioChunk(sessionId, pcm16k);
+              
+              // TODO: Implement bidirectional audio
+              // 1. Get synthesized response from ML pipeline (STT → VLLM → TTS)
+              // 2. Convert PCM 16kHz response to μ-law 8kHz using converter.convertMLToTelephony()
+              // 3. Send back to Twilio using media 'mark' and 'media' events
+            } catch (conversionError: any) {
+              console.error('[TwilioMedia] Audio conversion error:', conversionError.message);
+              // Continue without conversion as fallback (may affect STT accuracy)
+              await telephonyService.processAudioChunk(sessionId, audioChunk);
+            }
             break;
             
           case 'stop':
