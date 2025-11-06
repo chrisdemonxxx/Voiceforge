@@ -59,6 +59,17 @@ interface ConnectionInfo {
   apiKeyId?: string;
   lastActivity: Date;
   messageCount: number;
+  config?: {
+    mode: "voice" | "text" | "hybrid";
+    sttEnabled: boolean;
+    ttsEnabled: boolean;
+    agentEnabled: boolean;
+    agentMode: string;
+    systemPrompt?: string;
+    model: string;
+    voice?: string;
+    language: string;
+  };
 }
 
 // Advanced metrics tracking
@@ -190,12 +201,14 @@ export class RealTimeGateway {
     const session = this.sessions.createSession(apiKeyId, message.config.mode);
     conn.sessionId = session.id;
     conn.apiKeyId = apiKeyId;
+    conn.config = message.config;
     
     console.log(`[RealTime] Session ${session.id} initialized`, {
       mode: message.config.mode,
       stt: message.config.sttEnabled,
       tts: message.config.ttsEnabled,
       agent: message.config.agentEnabled,
+      agentMode: message.config.agentMode,
     });
     
     // Send ready acknowledgment
@@ -220,6 +233,8 @@ export class RealTimeGateway {
     
     // Real STT processing using worker pool
     const sttProcessingStart = Date.now();
+    let transcription = "Hello, this is a test message from the real-time lab";
+    let sttProcessingTime = 0;
     
     try {
       // Process audio chunk through worker pool
@@ -230,7 +245,7 @@ export class RealTimeGateway {
         return_partial: true,
       });
       
-      const sttProcessingTime = Date.now() - sttProcessingStart;
+      sttProcessingTime = Date.now() - sttProcessingStart;
       
       // Send partial transcription if available
       if (sttResult.is_partial && sttResult.text && sttResult.vad_active) {
@@ -245,7 +260,7 @@ export class RealTimeGateway {
       
       // Send final STT result if we have complete transcription
       if (!sttResult.is_partial || sttResult.text.length > 10) {
-        const transcription = sttResult.text || "Hello, this is a test message from the real-time lab";
+        transcription = sttResult.text || transcription;
         
         this.sendMessage(ws, {
           type: "stt_final",
@@ -267,13 +282,13 @@ export class RealTimeGateway {
       console.error("[RealTime] STT processing error:", error);
       
       // Fallback to mock on error
-      const sttProcessingTime = Date.now() - sttProcessingStart;
-      const mockTranscription = "Hello, this is a fallback transcription";
+      sttProcessingTime = Date.now() - sttProcessingStart;
+      transcription = "Hello, this is a fallback transcription";
       
       this.sendMessage(ws, {
         type: "stt_final",
         eventId: message.eventId,
-        text: mockTranscription,
+        text: transcription,
         confidence: 0.85,
         language: "en",
         duration: 1.5,
@@ -286,119 +301,142 @@ export class RealTimeGateway {
       });
     }
     
-    const sttProcessingTime = Date.now() - sttProcessingStart;
-    
-    // Mock agent response (if enabled)
+    // VLLM Agent response (if enabled)
     const agentProcessingStart = Date.now();
-    await new Promise(resolve => setTimeout(resolve, 100)); // Simulate thinking
+    let agentResponse = "";
     
-    this.sendMessage(ws, {
-      type: "agent_thinking",
-      eventId: message.eventId,
-      status: "Processing your request...",
-    });
-    
-    await new Promise(resolve => setTimeout(resolve, 50));
-    const agentResponse = `I received: "${mockTranscription}"`;
-    
-    this.sendMessage(ws, {
-      type: "agent_reply",
-      eventId: message.eventId,
-      text: agentResponse,
-      timestamp: Date.now(),
-    });
+    if (conn.config?.agentEnabled) {
+      this.sendMessage(ws, {
+        type: "agent_thinking",
+        eventId: message.eventId,
+        status: "Processing your request...",
+      });
+      
+      try {
+        // Call VLLM agent with the transcription
+        const vllmResult = await pythonBridge.callVLLM({
+          session_id: conn.sessionId,
+          message: transcription,
+          mode: conn.config?.agentMode || "assistant",
+          system_prompt: conn.config?.systemPrompt,
+        });
+        
+        agentResponse = vllmResult.response;
+        
+        this.sendMessage(ws, {
+          type: "agent_reply",
+          eventId: message.eventId,
+          text: agentResponse,
+          timestamp: Date.now(),
+        });
+      } catch (error: any) {
+        console.error("[RealTime] VLLM agent error:", error);
+        
+        // Fallback response on error
+        agentResponse = `I received your message: "${transcription}"`;
+        
+        this.sendMessage(ws, {
+          type: "agent_reply",
+          eventId: message.eventId,
+          text: agentResponse,
+          timestamp: Date.now(),
+        });
+      }
+    }
     
     const agentProcessingTime = Date.now() - agentProcessingStart;
     
-    // Real TTS generation with streaming
+    // Real TTS generation with streaming (if enabled and agent responded)
     const ttsProcessingStart = Date.now();
     let firstChunkLatency = 0;
     let totalChunks = 0;
     
-    try {
-      await pythonBridge.callTTSStreaming(
-        {
-          text: agentResponse,
-          model: "chatterbox", // Use model from session config
-          voice: undefined,
-          speed: 1.0,
-          chunk_duration_ms: 200,
-        },
-        (chunk) => {
-          if (chunk.type === "error") {
-            console.error("[RealTime] TTS streaming error:", chunk.message);
-            return;
+    if (conn.config?.ttsEnabled && agentResponse) {
+      try {
+        await pythonBridge.callTTSStreaming(
+          {
+            text: agentResponse,
+            model: conn.config?.model || "chatterbox",
+            voice: conn.config?.voice,
+            speed: 1.0,
+            chunk_duration_ms: 200,
+          },
+          (chunk) => {
+            if (chunk.type === "error") {
+              console.error("[RealTime] TTS streaming error:", chunk.message);
+              return;
+            }
+            
+            // Track first chunk latency
+            if (chunk.sequence === 0) {
+              firstChunkLatency = chunk.latency_ms || 0;
+            }
+            
+            totalChunks++;
+            
+            // Send TTS chunk to client
+            this.sendMessage(ws, {
+              type: "tts_chunk",
+              eventId: message.eventId,
+              chunk: chunk.chunk || "",
+              sequence: chunk.sequence || 0,
+              done: chunk.done || false,
+            });
           }
-          
-          // Track first chunk latency
-          if (chunk.sequence === 0) {
-            firstChunkLatency = chunk.latency_ms || 0;
-          }
-          
-          totalChunks++;
-          
-          // Send TTS chunk to client
-          this.sendMessage(ws, {
-            type: "tts_chunk",
-            eventId: message.eventId,
-            chunk: chunk.chunk || "",
-            sequence: chunk.sequence || 0,
-            done: chunk.done || false,
-          });
+        );
+      
+        const ttsProcessingTime = Date.now() - ttsProcessingStart;
+        
+        // Send TTS complete with latency
+        this.sendMessage(ws, {
+          type: "tts_complete",
+          eventId: message.eventId,
+          duration: totalChunks * 0.2, // Approximate based on 200ms chunks
+          latency: {
+            processing: ttsProcessingTime,
+            streaming: firstChunkLatency,
+            total: ttsProcessingTime,
+          },
+        });
+      } catch (error: any) {
+        console.error("[RealTime] TTS streaming failed:", error);
+        
+        // Fallback to mock audio on error
+        const sampleRate = 16000;
+        const duration = 1.0;
+        const frequency = 440;
+        const samples = Math.floor(sampleRate * duration);
+        
+        const audioBuffer = new Int16Array(samples);
+        for (let i = 0; i < samples; i++) {
+          const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate);
+          audioBuffer[i] = Math.floor(sample * 32767 * 0.3);
         }
-      );
-      
-      const ttsProcessingTime = Date.now() - ttsProcessingStart;
-      
-      // Send TTS complete with latency
-      this.sendMessage(ws, {
-        type: "tts_complete",
-        eventId: message.eventId,
-        duration: totalChunks * 0.2, // Approximate based on 200ms chunks
-        latency: {
-          processing: ttsProcessingTime,
-          streaming: firstChunkLatency,
-          total: ttsProcessingTime,
-        },
-      });
-    } catch (error: any) {
-      console.error("[RealTime] TTS streaming failed:", error);
-      
-      // Fallback to mock audio on error
-      const sampleRate = 16000;
-      const duration = 1.0;
-      const frequency = 440;
-      const samples = Math.floor(sampleRate * duration);
-      
-      const audioBuffer = new Int16Array(samples);
-      for (let i = 0; i < samples; i++) {
-        const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate);
-        audioBuffer[i] = Math.floor(sample * 32767 * 0.3);
+        
+        const wavBuffer = this.createWAVBuffer(audioBuffer, sampleRate);
+        const base64Audio = Buffer.from(wavBuffer).toString('base64');
+        
+        this.sendMessage(ws, {
+          type: "tts_chunk",
+          eventId: message.eventId,
+          chunk: base64Audio,
+          sequence: 0,
+          done: true,
+        });
+        
+        const ttsProcessingTime = Date.now() - ttsProcessingStart;
+        
+        this.sendMessage(ws, {
+          type: "tts_complete",
+          eventId: message.eventId,
+          duration: 1.0,
+          latency: {
+            processing: ttsProcessingTime,
+            streaming: 10,
+            total: ttsProcessingTime,
+          },
+        });
       }
-      
-      const wavBuffer = this.createWAVBuffer(audioBuffer, sampleRate);
-      const base64Audio = Buffer.from(wavBuffer).toString('base64');
-      
-      this.sendMessage(ws, {
-        type: "tts_chunk",
-        eventId: message.eventId,
-        chunk: base64Audio,
-        sequence: 0,
-        done: true,
-      });
-      
-      const ttsProcessingTime = Date.now() - ttsProcessingStart;
-      
-      this.sendMessage(ws, {
-        type: "tts_complete",
-        eventId: message.eventId,
-        duration: 1.0,
-        latency: {
-          processing: ttsProcessingTime,
-          streaming: 10,
-          total: ttsProcessingTime,
-        },
-      });
     }
     
     const ttsProcessingTime = Date.now() - ttsProcessingStart;

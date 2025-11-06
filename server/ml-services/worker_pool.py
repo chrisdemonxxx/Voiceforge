@@ -101,9 +101,9 @@ class Worker:
                 service = StreamingTTSService()
                 print(f"[Worker {self.worker_id}] TTS streaming service initialized", file=sys.stderr, flush=True)
             elif self.worker_type == WorkerType.VLLM:
-                # VLLM service not yet implemented
-                print(f"[Worker {self.worker_id}] VLLM service not implemented", file=sys.stderr, flush=True)
-                return
+                from vllm_service import VLLMAgentService
+                service = VLLMAgentService()
+                print(f"[Worker {self.worker_id}] VLLM agent service initialized", file=sys.stderr, flush=True)
         except Exception as e:
             print(f"[Worker {self.worker_id}] Failed to initialize service: {e}", file=sys.stderr, flush=True)
             traceback.print_exc(file=sys.stderr)
@@ -167,6 +167,9 @@ class Worker:
             return {
                 "audio": base64.b64encode(audio_bytes).decode('utf-8')
             }
+        elif self.worker_type == WorkerType.VLLM:
+            # VLLM agent task processing
+            return service.generate_response(task.data)
         else:
             raise ValueError(f"Unknown worker type: {self.worker_type}")
     
