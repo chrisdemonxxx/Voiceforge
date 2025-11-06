@@ -14,6 +14,9 @@ import {
   sttRequestSchema,
   voiceCloneRequestSchema,
   insertApiKeySchema,
+  insertTelephonyProviderSchema,
+  insertPhoneNumberSchema,
+  insertCallingCampaignSchema,
 } from "@shared/schema";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -784,8 +787,8 @@ Return as JSON array of 3 variations.`;
   app.get("/api/telephony/providers", authenticateApiKey, async (req, res) => {
     try {
       const apiKey = (req as any).apiKey;
-      const provider = await storage.getActiveTelephonyProvider(apiKey.id);
-      res.json(provider || null);
+      const providers = await storage.getAllTelephonyProviders(apiKey.id);
+      res.json(providers);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -794,25 +797,37 @@ Return as JSON array of 3 variations.`;
   app.post("/api/telephony/providers", authenticateApiKey, async (req, res) => {
     try {
       const apiKey = (req as any).apiKey;
-      const provider = await storage.createTelephonyProvider({
+      
+      // Validate input
+      const validated = insertTelephonyProviderSchema.parse({
+        ...req.body,
         apiKeyId: apiKey.id,
-        provider: req.body.provider,
-        name: req.body.name,
-        credentials: req.body.credentials,
-        configuration: req.body.configuration,
       });
+      
+      const provider = await storage.createTelephonyProvider(validated);
       res.json(provider);
     } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
       res.status(500).json({ error: error.message });
     }
   });
 
   app.patch("/api/telephony/providers/:id", authenticateApiKey, async (req, res) => {
     try {
-      const provider = await storage.updateTelephonyProvider(req.params.id, req.body);
-      if (!provider) {
+      const apiKey = (req as any).apiKey;
+      
+      // Verify ownership
+      const existing = await storage.getTelephonyProvider(req.params.id);
+      if (!existing) {
         return res.status(404).json({ error: "Provider not found" });
       }
+      if (existing.apiKeyId !== apiKey.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      
+      const provider = await storage.updateTelephonyProvider(req.params.id, req.body);
       res.json(provider);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -821,11 +836,19 @@ Return as JSON array of 3 variations.`;
 
   app.delete("/api/telephony/providers/:id", authenticateApiKey, async (req, res) => {
     try {
-      const success = await storage.deleteTelephonyProvider(req.params.id);
-      if (!success) {
+      const apiKey = (req as any).apiKey;
+      
+      // Verify ownership
+      const existing = await storage.getTelephonyProvider(req.params.id);
+      if (!existing) {
         return res.status(404).json({ error: "Provider not found" });
       }
-      res.json({ success: true });
+      if (existing.apiKeyId !== apiKey.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      
+      const success = await storage.deleteTelephonyProvider(req.params.id);
+      res.json({ success });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -835,12 +858,15 @@ Return as JSON array of 3 variations.`;
   app.get("/api/telephony/numbers", authenticateApiKey, async (req, res) => {
     try {
       const apiKey = (req as any).apiKey;
-      const provider = await storage.getActiveTelephonyProvider(apiKey.id);
-      if (!provider) {
-        return res.json([]);
+      const providers = await storage.getAllTelephonyProviders(apiKey.id);
+      const allNumbers = [];
+      
+      for (const provider of providers) {
+        const numbers = await storage.getAllPhoneNumbers(provider.id);
+        allNumbers.push(...numbers);
       }
-      const numbers = await storage.getAllPhoneNumbers(provider.id);
-      res.json(numbers);
+      
+      res.json(allNumbers);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -848,25 +874,43 @@ Return as JSON array of 3 variations.`;
 
   app.post("/api/telephony/numbers", authenticateApiKey, async (req, res) => {
     try {
-      const number = await storage.createPhoneNumber({
-        providerId: req.body.providerId,
-        phoneNumber: req.body.phoneNumber,
-        friendlyName: req.body.friendlyName,
-        country: req.body.country,
-        capabilities: req.body.capabilities,
-      });
+      const apiKey = (req as any).apiKey;
+      
+      // Validate input
+      const validated = insertPhoneNumberSchema.parse(req.body);
+      
+      // Verify provider ownership
+      const provider = await storage.getTelephonyProvider(validated.providerId);
+      if (!provider || provider.apiKeyId !== apiKey.id) {
+        return res.status(403).json({ error: "Provider not found or access denied" });
+      }
+      
+      const number = await storage.createPhoneNumber(validated);
       res.json(number);
     } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
       res.status(500).json({ error: error.message });
     }
   });
 
   app.patch("/api/telephony/numbers/:id", authenticateApiKey, async (req, res) => {
     try {
-      const number = await storage.updatePhoneNumber(req.params.id, req.body);
-      if (!number) {
+      const apiKey = (req as any).apiKey;
+      
+      // Verify ownership via provider
+      const existing = await storage.getPhoneNumber(req.params.id);
+      if (!existing) {
         return res.status(404).json({ error: "Phone number not found" });
       }
+      
+      const provider = await storage.getTelephonyProvider(existing.providerId);
+      if (!provider || provider.apiKeyId !== apiKey.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      
+      const number = await storage.updatePhoneNumber(req.params.id, req.body);
       res.json(number);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -875,11 +919,21 @@ Return as JSON array of 3 variations.`;
 
   app.delete("/api/telephony/numbers/:id", authenticateApiKey, async (req, res) => {
     try {
-      const success = await storage.deletePhoneNumber(req.params.id);
-      if (!success) {
+      const apiKey = (req as any).apiKey;
+      
+      // Verify ownership via provider
+      const existing = await storage.getPhoneNumber(req.params.id);
+      if (!existing) {
         return res.status(404).json({ error: "Phone number not found" });
       }
-      res.json({ success: true });
+      
+      const provider = await storage.getTelephonyProvider(existing.providerId);
+      if (!provider || provider.apiKeyId !== apiKey.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      
+      const success = await storage.deletePhoneNumber(req.params.id);
+      res.json({ success });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -898,10 +952,19 @@ Return as JSON array of 3 variations.`;
 
   app.get("/api/telephony/calls/:id", authenticateApiKey, async (req, res) => {
     try {
+      const apiKey = (req as any).apiKey;
+      
       const call = await storage.getCall(req.params.id);
       if (!call) {
         return res.status(404).json({ error: "Call not found" });
       }
+      
+      // Verify ownership via provider
+      const provider = await storage.getTelephonyProvider(call.providerId);
+      if (!provider || provider.apiKeyId !== apiKey.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      
       res.json(call);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -921,10 +984,18 @@ Return as JSON array of 3 variations.`;
 
   app.get("/api/telephony/campaigns/:id", authenticateApiKey, async (req, res) => {
     try {
+      const apiKey = (req as any).apiKey;
+      
       const campaign = await storage.getCallingCampaign(req.params.id);
       if (!campaign) {
         return res.status(404).json({ error: "Campaign not found" });
       }
+      
+      // Verify ownership
+      if (campaign.apiKeyId !== apiKey.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      
       res.json(campaign);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -934,26 +1005,45 @@ Return as JSON array of 3 variations.`;
   app.post("/api/telephony/campaigns", authenticateApiKey, async (req, res) => {
     try {
       const apiKey = (req as any).apiKey;
-      const campaign = await storage.createCallingCampaign({
+      
+      // Validate input
+      const validated = insertCallingCampaignSchema.parse({
+        ...req.body,
         apiKeyId: apiKey.id,
-        providerId: req.body.providerId,
-        name: req.body.name,
-        phoneList: req.body.phoneNumbers,
-        flowId: req.body.flowId,
-        description: req.body.description,
       });
+      
+      // Verify provider ownership if providerId is specified
+      if (validated.providerId) {
+        const provider = await storage.getTelephonyProvider(validated.providerId);
+        if (!provider || provider.apiKeyId !== apiKey.id) {
+          return res.status(403).json({ error: "Provider not found or access denied" });
+        }
+      }
+      
+      const campaign = await storage.createCallingCampaign(validated);
       res.json(campaign);
     } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
       res.status(500).json({ error: error.message });
     }
   });
 
   app.patch("/api/telephony/campaigns/:id", authenticateApiKey, async (req, res) => {
     try {
-      const campaign = await storage.updateCallingCampaign(req.params.id, req.body);
-      if (!campaign) {
+      const apiKey = (req as any).apiKey;
+      
+      // Verify ownership
+      const existing = await storage.getCallingCampaign(req.params.id);
+      if (!existing) {
         return res.status(404).json({ error: "Campaign not found" });
       }
+      if (existing.apiKeyId !== apiKey.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      
+      const campaign = await storage.updateCallingCampaign(req.params.id, req.body);
       res.json(campaign);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -962,11 +1052,19 @@ Return as JSON array of 3 variations.`;
 
   app.delete("/api/telephony/campaigns/:id", authenticateApiKey, async (req, res) => {
     try {
-      const success = await storage.deleteCallingCampaign(req.params.id);
-      if (!success) {
+      const apiKey = (req as any).apiKey;
+      
+      // Verify ownership
+      const existing = await storage.getCallingCampaign(req.params.id);
+      if (!existing) {
         return res.status(404).json({ error: "Campaign not found" });
       }
-      res.json({ success: true });
+      if (existing.apiKeyId !== apiKey.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      
+      const success = await storage.deleteCallingCampaign(req.params.id);
+      res.json({ success });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
