@@ -10,6 +10,7 @@ export interface IStorage {
   getAllApiKeys(): Promise<ApiKey[]>;
   createApiKey(apiKey: InsertApiKey): Promise<ApiKey>;
   deleteApiKey(id: string): Promise<boolean>;
+  updateApiKey(id: string, data: Partial<Pick<ApiKey, 'active'>>): Promise<ApiKey | undefined>;
   incrementApiKeyUsage(id: string): Promise<void>;
   
   // Cloned Voices
@@ -47,6 +48,15 @@ export class DbStorage implements IStorage {
   async deleteApiKey(id: string): Promise<boolean> {
     const result = await db.delete(apiKeys).where(eq(apiKeys.id, id));
     return result.rowCount !== null && result.rowCount > 0;
+  }
+
+  async updateApiKey(id: string, data: Partial<Pick<ApiKey, 'active'>>): Promise<ApiKey | undefined> {
+    const result = await db.update(apiKeys)
+      .set(data)
+      .where(eq(apiKeys.id, id))
+      .returning();
+    
+    return result[0];
   }
 
   async incrementApiKeyUsage(id: string): Promise<void> {
