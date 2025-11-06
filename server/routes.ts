@@ -1058,6 +1058,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // Twilio Webhook Routes
+  // TwiML generation endpoint - returns instructions for handling the call
+  app.post("/api/telephony/twiml/:sessionId", async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const session = telephonyService.getSession(sessionId);
+      
+      if (!session) {
+        console.error(`[Telephony] Session not found: ${sessionId}`);
+        res.type('text/xml');
+        return res.send('<Response><Say>Call session not found</Say><Hangup/></Response>');
+      }
+
+      // Generate WebSocket stream URL for real-time audio
+      const baseUrl = process.env.REPLIT_DOMAINS 
+        ? `wss://${process.env.REPLIT_DOMAINS.split(',')[0]}`
+        : 'ws://localhost:5000';
+      const streamUrl = `${baseUrl}/ws/telephony/${sessionId}/stream`;
+
+      // Generate TwiML with streaming and optional greeting
+      const { TwilioProvider } = await import("./services/telephony-providers/twilio-provider");
+      const twiml = TwilioProvider.generateTwiML({
+        message: "Please wait while we connect you...",
+        streamUrl,
+        recordingEnabled: true,
+      });
+
+      res.type('text/xml');
+      res.send(twiml);
+    } catch (error: any) {
+      console.error("[Telephony] TwiML generation error:", error);
+      res.type('text/xml');
+      res.send('<Response><Say>An error occurred</Say><Hangup/></Response>');
+    }
+  });
+
+  // Status callback endpoint - receives call status updates
+  app.post("/api/telephony/status/:callId", async (req, res) => {
+    try {
+      const { callId } = req.params;
+      const { CallStatus, CallDuration, RecordingUrl } = req.body;
+      
+      console.log(`[Telephony] Status update for call ${callId}: ${CallStatus}`);
+
+      // Map Twilio status to our status
+      const statusMap: Record<string, string> = {
+        'queued': 'queued',
+        'ringing': 'ringing',
+        'in-progress': 'in-progress',
+        'completed': 'completed',
+        'busy': 'failed',
+        'no-answer': 'failed',
+        'canceled': 'failed',
+        'failed': 'failed'
+      };
+
+      const updates: any = {
+        status: statusMap[CallStatus] || CallStatus,
+      };
+
+      if (CallDuration) {
+        updates.duration = parseInt(CallDuration);
+      }
+
+      if (RecordingUrl) {
+        updates.recordingUrl = RecordingUrl;
+      }
+
+      if (['completed', 'busy', 'no-answer', 'canceled', 'failed'].includes(CallStatus)) {
+        updates.endedAt = new Date();
+      }
+
+      await storage.updateCall(callId, updates);
+      
+      res.sendStatus(200);
+    } catch (error: any) {
+      console.error("[Telephony] Status callback error:", error);
+      res.sendStatus(500);
+    }
+  });
   
   // WebSocket Server for Real-time Streaming (legacy)
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
