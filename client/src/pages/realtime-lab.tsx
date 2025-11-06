@@ -7,14 +7,19 @@ import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Mic, MicOff, Play, Pause, Activity, Zap, MessageSquare, Volume2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Mic, MicOff, Play, Pause, Activity, Zap, MessageSquare, Volume2, Download, ThumbsUp, ThumbsDown, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import type { WSClientMessage, WSServerMessage } from "@shared/schema";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from "recharts";
+import { useQuery } from "@tanstack/react-query";
 
 interface SessionConfig {
   mode: "voice" | "text" | "hybrid";
   sttEnabled: boolean;
   ttsEnabled: boolean;
   agentEnabled: boolean;
+  agentMode: "echo" | "assistant" | "conversational" | "custom";
+  systemPrompt?: string;
   model: "chatterbox" | "higgs_audio_v2" | "styletts2";
   language: string;
   voice?: string;
@@ -44,6 +49,7 @@ export default function RealTimeLab() {
     sttEnabled: true,
     ttsEnabled: true,
     agentEnabled: true,
+    agentMode: "assistant",
     model: "chatterbox",
     language: "en",
   });
@@ -59,6 +65,9 @@ export default function RealTimeLab() {
   const [partialTranscript, setPartialTranscript] = useState("");
   const [audioLevel, setAudioLevel] = useState(0);
   const [systemMetrics, setSystemMetrics] = useState({ activeConnections: 0, queueDepth: 0 });
+  const [metricsView, setMetricsView] = useState<"live" | "historical">("live");
+  const [latencyHistory, setLatencyHistory] = useState<Array<{timestamp: number; stt: number; agent: number; tts: number; e2e: number}>>([]);
+  const [lastMessageId, setLastMessageId] = useState<string | null>(null);
   
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -156,6 +165,20 @@ export default function RealTimeLab() {
       case "metrics":
         if (message.metrics.endToEndLatency) {
           setLatency(prev => ({ ...prev, endToEnd: message.metrics.endToEndLatency || null }));
+          
+          // Add to latency history for charts
+          setLatencyHistory(prev => {
+            const newEntry = {
+              timestamp: Date.now(),
+              stt: message.metrics.sttLatency || 0,
+              agent: message.metrics.agentLatency || 0,
+              tts: message.metrics.ttsLatency || 0,
+              e2e: message.metrics.endToEndLatency || 0,
+            };
+            const updated = [...prev, newEntry];
+            // Keep last 50 entries for live view
+            return updated.slice(-50);
+          });
         }
         setSystemMetrics({
           activeConnections: message.metrics.activeConnections,
@@ -338,14 +361,66 @@ export default function RealTimeLab() {
   const generateEventId = () => `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   
   const addMessage = (role: "user" | "agent", text: string, latency?: number) => {
+    const id = generateEventId();
     setConversation(prev => [...prev, {
-      id: generateEventId(),
+      id,
       role,
       text,
       timestamp: Date.now(),
       latency,
     }]);
+    if (role === "agent") {
+      setLastMessageId(id);
+    }
   };
+  
+  // Send quality feedback
+  const sendQualityFeedback = (category: "stt_accuracy" | "tts_quality" | "latency" | "overall", score: number) => {
+    if (!wsRef.current || !connected) return;
+    
+    const message: WSClientMessage = {
+      type: "quality_feedback",
+      eventId: generateEventId(),
+      category,
+      score,
+    };
+    wsRef.current.send(JSON.stringify(message));
+  };
+  
+  // Export metrics
+  const exportMetrics = async (format: 'json' | 'csv') => {
+    try {
+      const response = await fetch(`/api/realtime/metrics/history?format=${format}`);
+      
+      if (format === 'csv') {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'metrics-history.csv';
+        a.click();
+        window.URL.revokeObjectURL(url);
+      } else {
+        const data = await response.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'metrics-history.json';
+        a.click();
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+    }
+  };
+  
+  // Fetch comprehensive metrics
+  const { data: comprehensiveMetrics } = useQuery({
+    queryKey: ['/api/realtime/metrics'],
+    enabled: connected && metricsView === 'historical',
+    refetchInterval: 5000,
+  });
   
   // Cleanup on unmount
   useEffect(() => {
@@ -463,6 +538,33 @@ export default function RealTimeLab() {
                     data-testid="switch-agent"
                   />
                 </div>
+                
+                {config.agentEnabled && (
+                  <div className="space-y-2">
+                    <Label htmlFor="agent-mode" className="text-xs text-muted-foreground">Agent Mode</Label>
+                    <Select
+                      value={config.agentMode}
+                      onValueChange={(value) => setConfig({ ...config, agentMode: value as any })}
+                      disabled={connected}
+                    >
+                      <SelectTrigger id="agent-mode" className="h-8 text-xs" data-testid="select-agent-mode">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="echo" data-testid="option-echo">Echo</SelectItem>
+                        <SelectItem value="assistant" data-testid="option-assistant">Assistant</SelectItem>
+                        <SelectItem value="conversational" data-testid="option-conversational">Conversational</SelectItem>
+                        <SelectItem value="custom" data-testid="option-custom">Custom</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {config.agentMode === "echo" && "Simple echo response"}
+                      {config.agentMode === "assistant" && "Helpful AI assistant with structured responses"}
+                      {config.agentMode === "conversational" && "Natural dialogue with context memory"}
+                      {config.agentMode === "custom" && "Custom personality via system prompt"}
+                    </p>
+                  </div>
+                )}
                 
                 <div className="pt-2 border-t">
                   <Label className="text-xs text-muted-foreground">TTS Model</Label>
@@ -636,6 +738,29 @@ export default function RealTimeLab() {
                       )}
                     </div>
                     <p className="text-sm text-foreground">{msg.text}</p>
+                    {msg.role === "agent" && msg.id === lastMessageId && (
+                      <div className="flex items-center gap-2 mt-2 pt-2 border-t">
+                        <span className="text-xs text-muted-foreground">Quality:</span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2"
+                          onClick={() => sendQualityFeedback("overall", 5)}
+                          data-testid="button-feedback-good"
+                        >
+                          <ThumbsUp className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2"
+                          onClick={() => sendQualityFeedback("overall", 1)}
+                          data-testid="button-feedback-bad"
+                        >
+                          <ThumbsDown className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ))}
                 
@@ -685,6 +810,224 @@ export default function RealTimeLab() {
             </Card>
           </div>
         </div>
+        
+        {/* Advanced Metrics Section */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Advanced Metrics & Analytics</CardTitle>
+                <CardDescription>Real-time performance monitoring and quality tracking</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Tabs value={metricsView} onValueChange={(v) => setMetricsView(v as "live" | "historical")}>
+                  <TabsList>
+                    <TabsTrigger value="live" data-testid="tab-metrics-live">Live</TabsTrigger>
+                    <TabsTrigger value="historical" data-testid="tab-metrics-historical">Historical</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => exportMetrics('json')}
+                  data-testid="button-export-json"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  JSON
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => exportMetrics('csv')}
+                  data-testid="button-export-csv"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  CSV
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {metricsView === "live" ? (
+              <>
+                {/* Live Latency Chart */}
+                <div>
+                  <h3 className="text-sm font-medium mb-3">Latency Over Time (Last 50 samples)</h3>
+                  {latencyHistory.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <LineChart data={latencyHistory}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis 
+                          dataKey="timestamp" 
+                          tickFormatter={(ts) => new Date(ts).toLocaleTimeString()} 
+                          className="text-xs"
+                        />
+                        <YAxis label={{ value: 'Latency (ms)', angle: -90, position: 'insideLeft' }} className="text-xs" />
+                        <Tooltip 
+                          labelFormatter={(ts) => new Date(ts as number).toLocaleTimeString()}
+                          contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
+                        />
+                        <Legend />
+                        <Line type="monotone" dataKey="stt" stroke="#8884d8" name="STT" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="agent" stroke="#82ca9d" name="Agent" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="tts" stroke="#ffc658" name="TTS" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="e2e" stroke="#ff7c7c" name="E2E" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-[300px] flex items-center justify-center border rounded-lg bg-muted/20">
+                      <p className="text-sm text-muted-foreground">No data yet. Start a conversation to see metrics.</p>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Queue Depth Gauge */}
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Queue Depth</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center justify-center">
+                        <div className="text-center">
+                          <p className="text-4xl font-bold text-primary">{systemMetrics.queueDepth}</p>
+                          <p className="text-xs text-muted-foreground mt-1">requests queued</p>
+                        </div>
+                      </div>
+                      <Progress value={(systemMetrics.queueDepth / 10) * 100} className="h-2 mt-4" />
+                    </CardContent>
+                  </Card>
+                  
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Active Connections</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center justify-center">
+                        <div className="text-center">
+                          <p className="text-4xl font-bold text-primary">{systemMetrics.activeConnections}</p>
+                          <p className="text-xs text-muted-foreground mt-1">concurrent sessions</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Historical Metrics */}
+                {comprehensiveMetrics ? (
+                  <>
+                    {/* Percentile Stats Cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {['stt', 'agent', 'tts', 'endToEnd'].map((metric) => {
+                        const data = (comprehensiveMetrics as any).latency[metric];
+                        return (
+                          <Card key={metric}>
+                            <CardHeader className="pb-2">
+                              <CardTitle className="text-xs uppercase text-muted-foreground">
+                                {metric === 'endToEnd' ? 'End-to-End' : metric.toUpperCase()}
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">Avg:</span>
+                                <span className="font-mono font-medium">{data?.avg ?? '--'}ms</span>
+                              </div>
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">P50:</span>
+                                <span className="font-mono font-medium">{data?.p50 ?? '--'}ms</span>
+                              </div>
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">P95:</span>
+                                <span className="font-mono font-medium">{data?.p95 ?? '--'}ms</span>
+                              </div>
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">P99:</span>
+                                <span className="font-mono font-medium">{data?.p99 ?? '--'}ms</span>
+                              </div>
+                              <div className="flex items-center gap-1 pt-1 border-t">
+                                {data?.trend === 'improving' && <TrendingDown className="h-3 w-3 text-green-500" />}
+                                {data?.trend === 'degrading' && <TrendingUp className="h-3 w-3 text-red-500" />}
+                                {data?.trend === 'stable' && <Minus className="h-3 w-3 text-muted-foreground" />}
+                                <span className="text-xs text-muted-foreground capitalize">{data?.trend ?? 'stable'}</span>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                    
+                    {/* Quality Distribution Chart */}
+                    <div>
+                      <h3 className="text-sm font-medium mb-3">Quality Scores</h3>
+                      {(comprehensiveMetrics as any).quality?.feedbackCount > 0 ? (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {[
+                            { key: 'sttAccuracy', label: 'STT Accuracy', color: '#8884d8' },
+                            { key: 'ttsQuality', label: 'TTS Quality', color: '#82ca9d' },
+                            { key: 'latencyRating', label: 'Latency Rating', color: '#ffc658' },
+                            { key: 'overall', label: 'Overall', color: '#ff7c7c' },
+                          ].map(({ key, label, color }) => {
+                            const score = (comprehensiveMetrics as any).quality?.[key];
+                            return (
+                              <Card key={key}>
+                                <CardContent className="pt-6">
+                                  <p className="text-xs text-muted-foreground mb-2">{label}</p>
+                                  <div className="flex items-baseline gap-1">
+                                    <p className="text-2xl font-bold" style={{ color }}>
+                                      {score ?? '--'}
+                                    </p>
+                                    <span className="text-xs text-muted-foreground">/ 5.0</span>
+                                  </div>
+                                  <Progress 
+                                    value={score ? (parseFloat(score) / 5) * 100 : 0} 
+                                    className="h-1 mt-2" 
+                                  />
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="h-[200px] flex items-center justify-center border rounded-lg bg-muted/20">
+                          <p className="text-sm text-muted-foreground">No quality feedback yet. Rate responses to see quality metrics.</p>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Error Rates */}
+                    <div>
+                      <h3 className="text-sm font-medium mb-3">Error Rates by Stage</h3>
+                      <div className="grid grid-cols-4 gap-4">
+                        {[
+                          { key: 'stt', label: 'STT Errors' },
+                          { key: 'agent', label: 'Agent Errors' },
+                          { key: 'tts', label: 'TTS Errors' },
+                          { key: 'total', label: 'Total Errors' },
+                        ].map(({ key, label }) => {
+                          const count = (comprehensiveMetrics as any).errors?.[key] ?? 0;
+                          return (
+                            <Card key={key}>
+                              <CardContent className="pt-6">
+                                <p className="text-xs text-muted-foreground mb-1">{label}</p>
+                                <p className="text-2xl font-bold text-foreground">{count}</p>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="h-[400px] flex items-center justify-center">
+                    <p className="text-sm text-muted-foreground">Loading historical metrics...</p>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

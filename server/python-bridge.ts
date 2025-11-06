@@ -350,10 +350,28 @@ class WorkerPool {
   }
 }
 
+interface VLLMRequest {
+  session_id: string;
+  message: string;
+  mode?: string;
+  system_prompt?: string;
+  stream?: boolean;
+}
+
+interface VLLMResponse {
+  response: string;
+  session_id: string;
+  mode: string;
+  processing_time: number;
+  context_size: number;
+  tokens: number;
+}
+
 export class PythonBridge {
   private pythonPath: string;
   private sttPool: WorkerPool | null = null;
   private ttsPool: WorkerPool | null = null;
+  private vllmPool: WorkerPool | null = null;
   
   constructor() {
     // Use python3 from PATH
@@ -370,6 +388,10 @@ export class PythonBridge {
     // Start TTS worker pool (2 workers)
     this.ttsPool = new WorkerPool("tts", 2);
     await this.ttsPool.start();
+    
+    // Start VLLM worker pool (1 worker for now, can scale up)
+    this.vllmPool = new WorkerPool("vllm", 1);
+    await this.vllmPool.start();
     
     console.log("[PythonBridge] Worker pools initialized");
   }
@@ -526,10 +548,39 @@ export class PythonBridge {
     });
   }
   
+  async callVLLM(request: VLLMRequest): Promise<VLLMResponse> {
+    if (!this.vllmPool) {
+      throw new Error("VLLM worker pool not initialized");
+    }
+    
+    try {
+      const result = await this.vllmPool.submitTask(request, 0);
+      
+      if (!result.response) {
+        throw new Error("No response from VLLM agent");
+      }
+      
+      return result as VLLMResponse;
+    } catch (error) {
+      console.error("[PythonBridge] VLLM error:", error);
+      
+      // Fallback response
+      return {
+        response: `I received your message: "${request.message}". How can I help you?`,
+        session_id: request.session_id,
+        mode: request.mode || "assistant",
+        processing_time: 0.1,
+        context_size: 1,
+        tokens: 10
+      };
+    }
+  }
+  
   async getMetrics() {
     const metrics: any = {
       stt: null,
-      tts: null
+      tts: null,
+      vllm: null
     };
     
     if (this.sttPool) {
@@ -548,6 +599,14 @@ export class PythonBridge {
       }
     }
     
+    if (this.vllmPool) {
+      try {
+        metrics.vllm = await this.vllmPool.getMetrics();
+      } catch (error) {
+        console.error("[PythonBridge] Failed to get VLLM metrics:", error);
+      }
+    }
+    
     return metrics;
   }
   
@@ -560,6 +619,10 @@ export class PythonBridge {
     
     if (this.ttsPool) {
       await this.ttsPool.shutdown();
+    }
+    
+    if (this.vllmPool) {
+      await this.vllmPool.shutdown();
     }
     
     console.log("[PythonBridge] Worker pools shut down");

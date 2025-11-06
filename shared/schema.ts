@@ -29,6 +29,10 @@ export type ApiKey = typeof apiKeys.$inferSelect;
 export const TTSModel = z.enum(["chatterbox", "higgs_audio_v2", "styletts2"]);
 export type TTSModelType = z.infer<typeof TTSModel>;
 
+// Agent Modes enum
+export const AgentMode = z.enum(["echo", "assistant", "conversational", "custom"]);
+export type AgentModeType = z.infer<typeof AgentMode>;
+
 // Audio format enum
 export const AudioFormat = z.enum(["wav", "mp3", "flac", "ogg"]);
 export type AudioFormatType = z.infer<typeof AudioFormat>;
@@ -115,6 +119,8 @@ export const wsClientMessageSchema = z.discriminatedUnion("type", [
       sttEnabled: z.boolean().default(true),
       ttsEnabled: z.boolean().default(true),
       agentEnabled: z.boolean().default(false),
+      agentMode: AgentMode.default("assistant"),
+      systemPrompt: z.string().optional(),
       model: TTSModel.default("chatterbox"),
       voice: z.string().optional(),
       language: z.string().default("en"),
