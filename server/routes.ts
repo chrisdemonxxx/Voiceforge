@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { rateLimiter } from "./rate-limiter";
 import { pythonBridge } from "./python-bridge";
 import { RealTimeGateway } from "./realtime-gateway";
+import { generateAgentFlow } from "./services/ai-flow-generator";
 import multer from "multer";
 import { z } from "zod";
 import {
@@ -159,6 +160,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get all cloned voices (public endpoint for voice library page)
+  app.get("/api/cloned-voices", async (req, res) => {
+    try {
+      const keys = await storage.getAllApiKeys();
+      const allVoices = [];
+      
+      // Aggregate cloned voices from all API keys
+      for (const key of keys) {
+        const voices = await storage.getAllClonedVoices(key.id);
+        allVoices.push(...voices);
+      }
+      
+      res.json(allVoices);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // TTS Endpoint (used by both dashboard and landing page demo)
   app.post("/api/tts", authenticateApiKey, async (req, res) => {
     try {
@@ -277,15 +296,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Voice Cloning Endpoint
+  // Voice Cloning Endpoint - supports all three modes
   app.post("/api/clone-voice", authenticateApiKey, upload.single("reference"), async (req, res) => {
     try {
+      const apiKey = (req as any).apiKey;
+      
+      // Parse the request body with cloning mode
+      const data = voiceCloneRequestSchema.parse(req.body);
+      
+      // Handle based on cloning mode
+      if (data.cloningMode === "synthetic") {
+        // Synthetic voice - no audio file needed
+        const syntheticData = data as any; // TypeScript narrowing
+        
+        // Use OpenAI to generate voice characteristics from description
+        const openai = await import("openai");
+        const client = new openai.default({
+          apiKey: process.env.OPENAI_API_KEY,
+        });
+        
+        // Generate voice characteristics using GPT
+        const prompt = `Generate detailed voice characteristics for text-to-speech synthesis based on this description:
+        
+Description: ${syntheticData.voiceDescription}
+${syntheticData.age ? `Age: ${syntheticData.age}` : ''}
+${syntheticData.gender ? `Gender: ${syntheticData.gender}` : ''}
+${syntheticData.accent ? `Accent: ${syntheticData.accent}` : ''}
+${syntheticData.tone ? `Tone: ${syntheticData.tone}` : ''}
+
+Generate 3 different voice profile variations. For each, provide:
+1. fundamental_frequency (Hz): pitch (80-180 for male, 165-255 for female)
+2. formants (Hz): { f1: 200-1000, f2: 600-3000, f3: 1500-4000 }
+3. speaking_rate (words per minute): 100-200
+4. energy: 0.0-1.0
+5. pitch_variance: 0.0-0.5 (expressiveness)
+
+Return as JSON array of 3 variations.`;
+        
+        const completion = await client.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: "You are an expert in voice synthesis and acoustic modeling. Generate realistic voice characteristics based on descriptions."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          response_format: { type: "json_object" },
+        });
+        
+        const voiceCharacteristics = JSON.parse(completion.choices[0].message.content || "{}");
+        
+        // Create synthetic voice in database (use first variation as default)
+        const clonedVoice = await storage.createClonedVoice({
+          apiKeyId: apiKey.id,
+          name: syntheticData.name,
+          model: syntheticData.model,
+          description: syntheticData.voiceDescription,
+          cloningMode: "synthetic",
+          processingStatus: "completed",
+          voiceDescription: syntheticData.voiceDescription,
+          referenceAudioPath: null,
+          voiceCharacteristics: voiceCharacteristics.variations?.[0] || voiceCharacteristics,
+          status: "ready",
+        });
+        
+        return res.json({
+          id: clonedVoice.id,
+          name: clonedVoice.name,
+          model: clonedVoice.model,
+          status: clonedVoice.status,
+          cloningMode: clonedVoice.cloningMode,
+          processingStatus: clonedVoice.processingStatus,
+          createdAt: clonedVoice.createdAt,
+          characteristics: clonedVoice.voiceCharacteristics,
+          allVariations: voiceCharacteristics.variations || [voiceCharacteristics],
+        });
+      }
+      
+      // Instant or Professional mode - require audio file
       if (!req.file) {
         return res.status(400).json({ error: "No reference audio provided" });
       }
-
-      const data = voiceCloneRequestSchema.parse(req.body);
-      const apiKey = (req as any).apiKey;
+      
+      const instantData = data as any;
+      
+      // Validate audio duration for instant mode (30s - 2min)
+      // For professional mode (30+ minutes)
+      // TODO: Add audio duration validation
       
       // Analyze the reference audio to extract voice characteristics
       const analysis = await pythonBridge.analyzeVoice(req.file.buffer);
@@ -307,22 +408,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const audioFilePath = path.join(uploadsDir, audioFileName);
       await fs.writeFile(audioFilePath, req.file.buffer);
       
+      // Determine processing status based on mode
+      const processingStatus = data.cloningMode === "instant" ? "completed" : "pending";
+      const status = data.cloningMode === "instant" ? "ready" : "processing";
+      
       // Create cloned voice in database
       const clonedVoice = await storage.createClonedVoice({
         apiKeyId: apiKey.id,
-        name: data.name,
-        model: data.model,
-        description: data.description,
+        name: instantData.name,
+        model: instantData.model,
+        description: instantData.description,
+        cloningMode: data.cloningMode,
+        processingStatus: processingStatus,
         referenceAudioPath: `uploads/voices/${audioFileName}`,
         voiceCharacteristics: analysis.characteristics,
-        status: "ready",
+        status: status,
       });
+      
+      // If professional mode, start background processing
+      if (data.cloningMode === "professional") {
+        // Start background processing (mock - in production would use a queue)
+        setTimeout(async () => {
+          try {
+            await storage.updateClonedVoiceStatus(clonedVoice.id, "ready");
+            // Update processing status to completed
+            console.log(`[Professional Clone] Voice ${clonedVoice.id} processing completed`);
+          } catch (error) {
+            console.error(`[Professional Clone] Failed to update voice ${clonedVoice.id}:`, error);
+          }
+        }, 10000); // Mock 10 second delay (in production: 2-4 hours)
+      }
       
       res.json({
         id: clonedVoice.id,
         name: clonedVoice.name,
         model: clonedVoice.model,
         status: clonedVoice.status,
+        cloningMode: clonedVoice.cloningMode,
+        processingStatus: clonedVoice.processingStatus,
         createdAt: clonedVoice.createdAt,
         characteristics: clonedVoice.voiceCharacteristics,
       });
@@ -368,15 +491,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Voice not found" });
       }
 
-      // Delete the reference audio file
-      const fs = await import("fs/promises");
-      const path = await import("path");
-      const audioPath = path.join(process.cwd(), voice.referenceAudioPath);
-      
-      try {
-        await fs.unlink(audioPath);
-      } catch (error) {
-        console.warn("[Voice Delete] Failed to delete audio file:", error);
+      // Delete the reference audio file (if it exists - synthetic voices don't have audio files)
+      if (voice.referenceAudioPath) {
+        const fs = await import("fs/promises");
+        const path = await import("path");
+        const audioPath = path.join(process.cwd(), voice.referenceAudioPath);
+        
+        try {
+          await fs.unlink(audioPath);
+        } catch (error) {
+          console.warn("[Voice Delete] Failed to delete audio file:", error);
+        }
       }
 
       // Delete from database
@@ -460,6 +585,167 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(csvHeader + csvRows);
     } else {
       res.json(history);
+    }
+  });
+
+  // Agent Flows Management Routes
+  app.get("/api/agent-flows", authenticateApiKey, async (req, res) => {
+    try {
+      const apiKey = (req as any).apiKey;
+      const flows = await storage.getAllAgentFlows(apiKey.id);
+      res.json(flows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/agent-flows/:id", async (req, res) => {
+    try {
+      const flow = await storage.getAgentFlow(req.params.id);
+      if (!flow) {
+        return res.status(404).json({ error: "Flow not found" });
+      }
+      res.json(flow);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/agent-flows", authenticateApiKey, async (req, res) => {
+    try {
+      const apiKey = (req as any).apiKey;
+      const flow = await storage.createAgentFlow({
+        apiKeyId: apiKey.id,
+        name: req.body.name,
+        description: req.body.description,
+        configuration: req.body.configuration || {},
+      });
+      res.json(flow);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // AI-powered flow generation
+  app.post("/api/agent-flows/generate", authenticateApiKey, async (req, res) => {
+    try {
+      const { description } = req.body;
+      
+      if (!description || typeof description !== "string") {
+        return res.status(400).json({ error: "Description is required" });
+      }
+
+      console.log("[AI Flow Generator] Generating flow for:", description);
+      const generatedFlow = await generateAgentFlow(description);
+      console.log("[AI Flow Generator] Generated flow:", generatedFlow.name);
+
+      res.json(generatedFlow);
+    } catch (error: any) {
+      console.error("[AI Flow Generator] Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/agent-flows/:id", async (req, res) => {
+    try {
+      const flow = await storage.updateAgentFlow(req.params.id, req.body);
+      if (!flow) {
+        return res.status(404).json({ error: "Flow not found" });
+      }
+      res.json(flow);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/agent-flows/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteAgentFlow(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Flow not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Flow Nodes Routes
+  app.get("/api/agent-flows/:id/nodes", async (req, res) => {
+    try {
+      const nodes = await storage.getAllFlowNodes(req.params.id);
+      res.json(nodes);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/agent-flows/:id/nodes", async (req, res) => {
+    try {
+      const flowId = req.params.id;
+      const { nodes } = req.body;
+      
+      // Delete existing nodes for this flow
+      const existingNodes = await storage.getAllFlowNodes(flowId);
+      for (const node of existingNodes) {
+        await storage.deleteFlowNode(node.id);
+      }
+      
+      // Create new nodes
+      const createdNodes = [];
+      for (const nodeData of nodes) {
+        const node = await storage.createFlowNode({
+          flowId,
+          type: nodeData.type,
+          position: nodeData.position,
+          data: nodeData.data,
+        });
+        createdNodes.push(node);
+      }
+      
+      res.json(createdNodes);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Flow Edges Routes
+  app.get("/api/agent-flows/:id/edges", async (req, res) => {
+    try {
+      const edges = await storage.getAllFlowEdges(req.params.id);
+      res.json(edges);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/agent-flows/:id/edges", async (req, res) => {
+    try {
+      const flowId = req.params.id;
+      const { edges } = req.body;
+      
+      // Delete existing edges for this flow
+      const existingEdges = await storage.getAllFlowEdges(flowId);
+      for (const edge of existingEdges) {
+        await storage.deleteFlowEdge(edge.id);
+      }
+      
+      // Create new edges
+      const createdEdges = [];
+      for (const edgeData of edges) {
+        const edge = await storage.createFlowEdge({
+          flowId,
+          sourceNodeId: edgeData.sourceNodeId,
+          targetNodeId: edgeData.targetNodeId,
+          label: edgeData.label,
+          type: edgeData.type,
+        });
+        createdEdges.push(edge);
+      }
+      
+      res.json(createdEdges);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
   

@@ -1,4 +1,10 @@
-import { type ApiKey, type InsertApiKey, apiKeys, type ClonedVoice, type InsertClonedVoice, clonedVoices } from "@shared/schema";
+import { 
+  type ApiKey, type InsertApiKey, apiKeys, 
+  type ClonedVoice, type InsertClonedVoice, clonedVoices,
+  type AgentFlow, type InsertAgentFlow, agentFlows,
+  type FlowNode, type InsertFlowNode, flowNodes,
+  type FlowEdge, type InsertFlowEdge, flowEdges
+} from "@shared/schema";
 import { db } from "../db";
 import { eq, sql } from "drizzle-orm";
 import { randomBytes } from "crypto";
@@ -19,6 +25,27 @@ export interface IStorage {
   createClonedVoice(voice: InsertClonedVoice): Promise<ClonedVoice>;
   deleteClonedVoice(id: string): Promise<boolean>;
   updateClonedVoiceStatus(id: string, status: string): Promise<void>;
+  
+  // Agent Flows
+  getAgentFlow(id: string): Promise<AgentFlow | undefined>;
+  getAllAgentFlows(apiKeyId: string): Promise<AgentFlow[]>;
+  createAgentFlow(flow: InsertAgentFlow): Promise<AgentFlow>;
+  updateAgentFlow(id: string, data: Partial<Omit<AgentFlow, 'id' | 'apiKeyId' | 'createdAt'>>): Promise<AgentFlow | undefined>;
+  deleteAgentFlow(id: string): Promise<boolean>;
+  
+  // Flow Nodes
+  getFlowNode(id: string): Promise<FlowNode | undefined>;
+  getAllFlowNodes(flowId: string): Promise<FlowNode[]>;
+  createFlowNode(node: InsertFlowNode): Promise<FlowNode>;
+  updateFlowNode(id: string, data: Partial<Omit<FlowNode, 'id' | 'flowId' | 'createdAt'>>): Promise<FlowNode | undefined>;
+  deleteFlowNode(id: string): Promise<boolean>;
+  
+  // Flow Edges
+  getFlowEdge(id: string): Promise<FlowEdge | undefined>;
+  getAllFlowEdges(flowId: string): Promise<FlowEdge[]>;
+  createFlowEdge(edge: InsertFlowEdge): Promise<FlowEdge>;
+  updateFlowEdge(id: string, data: Partial<Omit<FlowEdge, 'id' | 'flowId' | 'createdAt'>>): Promise<FlowEdge | undefined>;
+  deleteFlowEdge(id: string): Promise<boolean>;
 }
 
 export class DbStorage implements IStorage {
@@ -102,6 +129,90 @@ export class DbStorage implements IStorage {
     if (result.length === 0) {
       throw new Error(`Cloned voice ${id} not found - unable to update status`);
     }
+  }
+
+  async getAgentFlow(id: string): Promise<AgentFlow | undefined> {
+    const results = await db.select().from(agentFlows).where(eq(agentFlows.id, id)).limit(1);
+    return results[0];
+  }
+
+  async getAllAgentFlows(apiKeyId: string): Promise<AgentFlow[]> {
+    return await db.select().from(agentFlows).where(eq(agentFlows.apiKeyId, apiKeyId));
+  }
+
+  async createAgentFlow(insertFlow: InsertAgentFlow): Promise<AgentFlow> {
+    const results = await db.insert(agentFlows).values(insertFlow).returning();
+    return results[0];
+  }
+
+  async updateAgentFlow(id: string, data: Partial<Omit<AgentFlow, 'id' | 'apiKeyId' | 'createdAt'>>): Promise<AgentFlow | undefined> {
+    const result = await db.update(agentFlows)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(agentFlows.id, id))
+      .returning();
+    
+    return result[0];
+  }
+
+  async deleteAgentFlow(id: string): Promise<boolean> {
+    const result = await db.delete(agentFlows).where(eq(agentFlows.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
+  }
+
+  async getFlowNode(id: string): Promise<FlowNode | undefined> {
+    const results = await db.select().from(flowNodes).where(eq(flowNodes.id, id)).limit(1);
+    return results[0];
+  }
+
+  async getAllFlowNodes(flowId: string): Promise<FlowNode[]> {
+    return await db.select().from(flowNodes).where(eq(flowNodes.flowId, flowId));
+  }
+
+  async createFlowNode(insertNode: InsertFlowNode): Promise<FlowNode> {
+    const results = await db.insert(flowNodes).values(insertNode).returning();
+    return results[0];
+  }
+
+  async updateFlowNode(id: string, data: Partial<Omit<FlowNode, 'id' | 'flowId' | 'createdAt'>>): Promise<FlowNode | undefined> {
+    const result = await db.update(flowNodes)
+      .set(data)
+      .where(eq(flowNodes.id, id))
+      .returning();
+    
+    return result[0];
+  }
+
+  async deleteFlowNode(id: string): Promise<boolean> {
+    const result = await db.delete(flowNodes).where(eq(flowNodes.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
+  }
+
+  async getFlowEdge(id: string): Promise<FlowEdge | undefined> {
+    const results = await db.select().from(flowEdges).where(eq(flowEdges.id, id)).limit(1);
+    return results[0];
+  }
+
+  async getAllFlowEdges(flowId: string): Promise<FlowEdge[]> {
+    return await db.select().from(flowEdges).where(eq(flowEdges.flowId, flowId));
+  }
+
+  async createFlowEdge(insertEdge: InsertFlowEdge): Promise<FlowEdge> {
+    const results = await db.insert(flowEdges).values(insertEdge).returning();
+    return results[0];
+  }
+
+  async updateFlowEdge(id: string, data: Partial<Omit<FlowEdge, 'id' | 'flowId' | 'createdAt'>>): Promise<FlowEdge | undefined> {
+    const result = await db.update(flowEdges)
+      .set(data)
+      .where(eq(flowEdges.id, id))
+      .returning();
+    
+    return result[0];
+  }
+
+  async deleteFlowEdge(id: string): Promise<boolean> {
+    const result = await db.delete(flowEdges).where(eq(flowEdges.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
   }
 }
 
