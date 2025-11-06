@@ -20,8 +20,15 @@ The platform adopts a developer-centric aesthetic inspired by platforms like Str
 *   **Text-to-Speech (TTS)**: 
     - **Base Models**: Chatterbox, Higgs Audio V2, StyleTTS2 for general-purpose synthesis
     - **Indian Language Support**: Integrated ai4bharat/indic-parler-tts via Hugging Face Inference API
-    - **Voice Library**: 69 pre-configured voices across 21 Indian languages (Hindi, Tamil, Telugu, Malayalam, Bengali, Urdu, Gujarati, Kannada, Marathi, Punjabi, Odia, Assamese, Nepali, Sindhi, Kashmiri, Sanskrit, Manipuri, Bodo, Dogri, Konkani, Maithili)
-    - **Voice Selection UI**: Language and gender filters, voice preview with descriptions
+    - **T1 Country Language Support**: Integrated parler-tts/parler-tts-mini-multilingual via Hugging Face Inference API
+    - **Voice Library**: 135+ pre-configured voices across 30+ languages:
+      - **Indian Languages (69 voices, 21 languages)**: Hindi, Tamil, Telugu, Malayalam, Bengali, Urdu, Gujarati, Kannada, Marathi, Punjabi, Odia, Assamese, Nepali, Sindhi, Kashmiri, Sanskrit, Manipuri, Bodo, Dogri, Konkani, Maithili
+      - **T1 Country Languages (74 voices, 12 languages)**: English (USA/UK/Canada/Australia), German, French, Spanish (Spain/Mexico), Italian, Portuguese (Brazil/Portugal), Dutch, Polish, Russian, Japanese, Korean, Chinese (Mandarin)
+    - **Intelligent Auto-Routing**: Automatically selects appropriate TTS model based on voice language selection
+      - Indian languages → ai4bharat/indic-parler-tts
+      - T1 languages → parler-tts-mini-multilingual
+      - Base models → worker pool (chatterbox, higgs_audio_v2, styletts2)
+    - **Voice Selection UI**: Language and gender filters, voice preview with descriptions, 30+ language support
     - **Performance**: Sub-200ms latency for base models; 5-20s for HF Inference API (cold start)
     - **Formats**: Multiple audio formats supported
 *   **Speech-to-Text (STT)**: Utilizes Whisper-large-v3-turbo for 99+ languages, offering high accuracy (98.5%+) and streaming support.
