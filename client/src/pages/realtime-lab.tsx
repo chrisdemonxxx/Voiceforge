@@ -8,10 +8,11 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mic, MicOff, Play, Pause, Activity, Zap, MessageSquare, Volume2, Download, ThumbsUp, ThumbsDown, TrendingUp, TrendingDown, Minus } from "lucide-react";
-import type { WSClientMessage, WSServerMessage } from "@shared/schema";
+import { Mic, MicOff, Play, Pause, Activity, Zap, MessageSquare, Volume2, Download, ThumbsUp, ThumbsDown, TrendingUp, TrendingDown, Minus, AlertCircle } from "lucide-react";
+import type { WSClientMessage, WSServerMessage, ApiKey } from "@shared/schema";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from "recharts";
 import { useQuery } from "@tanstack/react-query";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface SessionConfig {
   mode: "voice" | "text" | "hybrid";
@@ -41,6 +42,13 @@ interface ConversationMessage {
 }
 
 export default function RealTimeLab() {
+  // Fetch API keys for authentication
+  const { data: apiKeys } = useQuery<ApiKey[]>({
+    queryKey: ["/api/keys"],
+  });
+
+  const activeApiKey = apiKeys?.find(key => key.active);
+
   const [connected, setConnected] = useState(false);
   const [recording, setRecording] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -79,6 +87,11 @@ export default function RealTimeLab() {
   
   // WebSocket connection
   const connect = () => {
+    if (!activeApiKey) {
+      console.error("[RealTimeLab] No active API key found");
+      return;
+    }
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/realtime`);
     
@@ -86,10 +99,11 @@ export default function RealTimeLab() {
       console.log("[RealTimeLab] WebSocket connected");
       setConnected(true);
       
-      // Send init message
+      // Send init message with API key
       const initMessage: WSClientMessage = {
         type: "init",
         eventId: generateEventId(),
+        apiKey: activeApiKey.key,
         config,
       };
       ws.send(JSON.stringify(initMessage));
@@ -465,6 +479,16 @@ export default function RealTimeLab() {
             )}
           </div>
         </div>
+        
+        {/* API Key Warning */}
+        {!activeApiKey && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              No active API key found. Please create and activate an API key in the API Keys page to use the Real-Time Testing Playground.
+            </AlertDescription>
+          </Alert>
+        )}
         
         {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
