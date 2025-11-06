@@ -135,6 +135,7 @@ export const wsClientMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("init"),
     eventId: z.string(),
+    apiKey: z.string(),
     config: z.object({
       mode: z.enum(["voice", "text", "hybrid"]),
       sttEnabled: z.boolean().default(true),
