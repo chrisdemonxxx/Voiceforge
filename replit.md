@@ -9,7 +9,13 @@ I prefer detailed explanations and a collaborative approach. Please ask before m
 ## System Architecture
 
 ### UI/UX Decisions
-The platform adopts a developer-centric aesthetic inspired by platforms like Stripe, Replicate, and Hugging Face. This includes a professional, technical appearance with consistent spacing, component usage, and typography (Inter/IBM Plex Sans). Beautiful interactions and loading states are prioritized to enhance user experience.
+The platform features a **premium royal purple theme** designed to match and exceed ElevenLabs' elegance. The aesthetic combines:
+*   **Royal Color Palette**: Deep purples (primary: 266°), gold accents, sophisticated gradients
+*   **Glass Morphism**: Semi-transparent cards with backdrop blur effects
+*   **Premium Components**: Shadcn/ui with custom hover elevations and interactive states
+*   **Professional Navigation**: Comprehensive sidebar with organized feature access
+*   **Typography**: Inter/IBM Plex Sans for technical precision and readability
+*   **Interactions**: Subtle animations, loading states, and visual feedback throughout
 
 ### Technical Implementations
 *   **Frontend**: Built with React 18 and TypeScript, utilizing Wouter for routing, Tailwind CSS with shadcn/ui for styling, and TanStack Query for state management. WebSocket clients handle real-time communication.
@@ -33,7 +39,12 @@ The platform adopts a developer-centric aesthetic inspired by platforms like Str
     - **Formats**: Multiple audio formats supported
 *   **Speech-to-Text (STT)**: Utilizes Whisper-large-v3-turbo for 99+ languages, offering high accuracy (98.5%+) and streaming support.
 *   **Voice Activity Detection (VAD)**: Employs Silero VAD for precise, real-time speech segmentation.
-*   **Voice Cloning**: Provides zero-shot cloning with 5-second samples, supported by Chatterbox and Higgs Audio V2.
+*   **Voice Cloning**: Advanced 3-tier cloning system with professional-grade capabilities:
+    - **Instant Clone**: Zero-shot cloning with 5-second audio samples, minimal processing
+    - **Professional Clone**: Fine-tuned cloning with 1-5 minute samples, optimized quality
+    - **Synthetic Clone**: Text-based voice design with customizable voice characteristics
+    - **Backend Support**: Chatterbox and Higgs Audio V2 with formant synthesis
+    - **Database Schema**: Complete cloning metadata (mode, status, sample duration, training metrics)
 *   **VLLM Integration**: Enables voice-enabled conversational AI using Llama 3.3 / Qwen 2.5 models.
 *   **Real-time Gateway**: WebSocket-based dual-mode interface (voice/text/hybrid) for low-latency conversational AI
     - **Voice Mode**: STT → VLLM agent → TTS pipeline with streaming audio chunks
@@ -41,13 +52,37 @@ The platform adopts a developer-centric aesthetic inspired by platforms like Str
     - **Hybrid Mode**: Supports both voice and text input with unified agent processing
     - **Authentication**: Requires valid, active API key in WebSocket init message
     - **Metrics**: Real-time latency tracking (STT, agent, TTS, end-to-end) with quality feedback
+*   **Agent Flow Builder**: Visual graph-based editor for creating complex voice AI workflows:
+    - **AI-Powered Creation**: Natural language flow generation using OpenAI GPT-4o
+    - **5 Node Types**: Subagent (conversational AI), Tool (API integration), Agent Transfer, Phone Transfer, End Call
+    - **React Flow Integration**: Drag-and-drop visual editor with real-time graph manipulation
+    - **Database Persistence**: Full CRUD operations for flows, nodes, and edges
+    - **Export/Import**: JSON-based flow templates for sharing and version control
+*   **Real-Time Testing Playground**: Comprehensive testing interface for voice AI pipelines:
+    - **WebSocket Gateway**: Low-latency connection for real-time voice/text interactions
+    - **3 Modes**: Voice-only, Text-only, and Hybrid (voice + text) testing
+    - **Microphone Integration**: Live audio capture with WebRTC MediaRecorder
+    - **Real-Time Metrics**: STT latency, Agent latency, TTS latency, end-to-end tracking
+    - **Visual Analytics**: Historical metrics charts with exportable data
+    - **API Key Authentication**: Secure testing with automatic key injection from dashboard
 *   **Platform Features**: Includes API key management with usage tracking, real-time WebSocket streaming, usage analytics, rate limiting, authentication, and multi-format audio conversion.
+*   **Telephony System** (UI Complete, Backend Pending): Multi-provider telephony integration:
+    - **Provider Management**: Configuration UI for Twilio, Telnyx, Zadarma, and open-source PBX
+    - **Web Dialer**: Browser-based calling interface with dialpad and call controls
+    - **Batch Calling**: Campaign management for bulk outbound dialing
+    - **Note**: UI mockups complete, backend integration with provider SDKs pending
 
 ### System Design Choices
 *   **Database Architecture**: PostgreSQL with Drizzle ORM ensures production-grade persistence for API keys, usage tracking, and rate limits, utilizing atomic SQL operations and Neon serverless for scalability. The system auto-seeds default API keys on first startup to ensure immediate functionality.
-*   **Authentication System**: Database-backed API key management with Bearer token authentication on all protected routes. The dashboard fetches real API keys from the database and dynamically injects them into all authenticated requests (TTS, voice cloning, voice management). API keys are cryptographically generated with per-key rate limiting enforced at the middleware level.
-    - **API Key Management**: CRUD operations for API keys with toggle activation/deactivation, real-time usage statistics from authenticated endpoints, and visual warnings when no active keys exist
-    - **Realtime Gateway Authentication**: WebSocket connections require valid, active API key in init message; connections are rejected with error codes 4001 (invalid) or 4002 (inactive)
+*   **Authentication System**: Multi-layered security with admin and API key authentication:
+    - **Admin Authentication**: API key management routes protected with optional ADMIN_TOKEN environment variable
+      - **Development Mode**: No token required (console warning displayed)
+      - **Production Mode**: Requires Bearer token in Authorization header for all key management operations
+    - **API Key Authentication**: Database-backed Bearer token authentication on all protected routes
+      - Dashboard fetches real API keys from database and injects them into authenticated requests
+      - Cryptographically generated keys with per-key rate limiting at middleware level
+    - **API Key Management**: CRUD operations with toggle activation/deactivation, real-time usage statistics, visual warnings when no active keys exist
+    - **Realtime Gateway Authentication**: WebSocket connections require valid, active API key in init message; connections rejected with error codes 4001 (invalid) or 4002 (inactive)
 *   **Python ML Services Integration**: A unified worker pool architecture manages all ML services (STT, TTS, HF_TTS, VLLM) through persistent Python processes to minimize cold start latency. This design uses multiprocessing for task distribution, health checks, and automatic worker restarts. Communication with Python services occurs via JSON over stdin/stdout.
     - **STT Workers** (2 processes): Streaming transcription with partial results, VAD, confidence scoring, and timestamp alignment, achieving 30-60ms latency per chunk
     - **TTS Workers** (2 processes): Base model synthesis (Chatterbox, Higgs Audio V2, StyleTTS2) with formant-based voice generation
