@@ -25,6 +25,27 @@ export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
 export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 export type ApiKey = typeof apiKeys.$inferSelect;
 
+// Cloned Voices table
+export const clonedVoices = pgTable("cloned_voices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  apiKeyId: varchar("api_key_id").notNull().references(() => apiKeys.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  model: text("model").notNull(), // chatterbox or higgs_audio_v2
+  description: text("description"),
+  referenceAudioPath: text("reference_audio_path").notNull(),
+  voiceCharacteristics: jsonb("voice_characteristics"), // stores formant values, pitch, etc.
+  status: text("status").notNull().default("ready"), // processing, ready, failed
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertClonedVoiceSchema = createInsertSchema(clonedVoices).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertClonedVoice = z.infer<typeof insertClonedVoiceSchema>;
+export type ClonedVoice = typeof clonedVoices.$inferSelect;
+
 // TTS Models enum
 export const TTSModel = z.enum(["chatterbox", "higgs_audio_v2", "styletts2"]);
 export type TTSModelType = z.infer<typeof TTSModel>;
