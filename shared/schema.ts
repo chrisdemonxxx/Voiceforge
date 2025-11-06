@@ -481,3 +481,127 @@ export interface RealTimeSession {
   avgLatency: number;
   errorCount: number;
 }
+
+// Telephony Provider Types
+export const TelephonyProvider = z.enum(["twilio", "telnyx", "vonage", "zadarma", "custom"]);
+export type TelephonyProviderType = z.infer<typeof TelephonyProvider>;
+
+// Telephony Providers - Store provider credentials and configuration
+export const telephonyProviders = pgTable("telephony_providers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  apiKeyId: varchar("api_key_id").notNull().references(() => apiKeys.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(), // twilio, telnyx, vonage, zadarma, custom
+  name: text("name").notNull(),
+  credentials: jsonb("credentials").notNull(), // Encrypted provider credentials
+  configuration: jsonb("configuration"), // Provider-specific settings
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertTelephonyProviderSchema = createInsertSchema(telephonyProviders).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertTelephonyProvider = z.infer<typeof insertTelephonyProviderSchema>;
+export type TelephonyProvider = typeof telephonyProviders.$inferSelect;
+
+// Phone Numbers - Purchased or linked phone numbers
+export const phoneNumbers = pgTable("phone_numbers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  providerId: varchar("provider_id").notNull().references(() => telephonyProviders.id, { onDelete: "cascade" }),
+  phoneNumber: text("phone_number").notNull().unique(),
+  friendlyName: text("friendly_name"),
+  country: text("country"),
+  capabilities: jsonb("capabilities"), // {voice: true, sms: true, mms: false}
+  active: boolean("active").default(true).notNull(),
+  purchasedAt: timestamp("purchased_at").defaultNow().notNull(),
+});
+
+export const insertPhoneNumberSchema = createInsertSchema(phoneNumbers).omit({
+  id: true,
+  purchasedAt: true,
+});
+
+export type InsertPhoneNumber = z.infer<typeof insertPhoneNumberSchema>;
+export type PhoneNumber = typeof phoneNumbers.$inferSelect;
+
+// Call Status enum
+export const CallStatus = z.enum([
+  "queued", "initiated", "ringing", "in-progress", 
+  "completed", "failed", "busy", "no-answer", "canceled"
+]);
+export type CallStatusType = z.infer<typeof CallStatus>;
+
+// Call Direction enum
+export const CallDirection = z.enum(["inbound", "outbound"]);
+export type CallDirectionType = z.infer<typeof CallDirection>;
+
+// Calls - Individual call records
+export const calls = pgTable("calls", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  providerId: varchar("provider_id").notNull().references(() => telephonyProviders.id, { onDelete: "cascade" }),
+  campaignId: varchar("campaign_id").references(() => callingCampaigns.id, { onDelete: "set null" }),
+  phoneNumberId: varchar("phone_number_id").references(() => phoneNumbers.id, { onDelete: "set null" }),
+  flowId: varchar("flow_id").references(() => agentFlows.id, { onDelete: "set null" }),
+  providerCallId: text("provider_call_id"), // External provider's call ID
+  direction: text("direction").notNull(), // inbound or outbound
+  from: text("from").notNull(),
+  to: text("to").notNull(),
+  status: text("status").notNull().default("queued"),
+  duration: integer("duration"), // in seconds
+  recordingUrl: text("recording_url"),
+  transcriptUrl: text("transcriptUrl"),
+  metadata: jsonb("metadata"), // Additional call data
+  startedAt: timestamp("started_at"),
+  endedAt: timestamp("ended_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertCallSchema = createInsertSchema(calls).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCall = z.infer<typeof insertCallSchema>;
+export type Call = typeof calls.$inferSelect;
+
+// Campaign Status enum
+export const CampaignStatus = z.enum(["draft", "scheduled", "running", "paused", "completed", "failed"]);
+export type CampaignStatusType = z.infer<typeof CampaignStatus>;
+
+// Calling Campaigns - Batch calling campaigns
+export const callingCampaigns = pgTable("calling_campaigns", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  apiKeyId: varchar("api_key_id").notNull().references(() => apiKeys.id, { onDelete: "cascade" }),
+  providerId: varchar("provider_id").notNull().references(() => telephonyProviders.id, { onDelete: "cascade" }),
+  flowId: varchar("flow_id").references(() => agentFlows.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  phoneList: jsonb("phone_list").notNull(), // Array of phone numbers to call
+  status: text("status").notNull().default("draft"),
+  totalCalls: integer("total_calls").default(0).notNull(),
+  completedCalls: integer("completed_calls").default(0).notNull(),
+  successfulCalls: integer("successful_calls").default(0).notNull(),
+  failedCalls: integer("failed_calls").default(0).notNull(),
+  scheduledAt: timestamp("scheduled_at"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertCallingCampaignSchema = createInsertSchema(callingCampaigns).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  totalCalls: true,
+  completedCalls: true,
+  successfulCalls: true,
+  failedCalls: true,
+});
+
+export type InsertCallingCampaign = z.infer<typeof insertCallingCampaignSchema>;
+export type CallingCampaign = typeof callingCampaigns.$inferSelect;

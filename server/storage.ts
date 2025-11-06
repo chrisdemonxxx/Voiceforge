@@ -3,10 +3,14 @@ import {
   type ClonedVoice, type InsertClonedVoice, clonedVoices,
   type AgentFlow, type InsertAgentFlow, agentFlows,
   type FlowNode, type InsertFlowNode, flowNodes,
-  type FlowEdge, type InsertFlowEdge, flowEdges
+  type FlowEdge, type InsertFlowEdge, flowEdges,
+  type TelephonyProvider, type InsertTelephonyProvider, telephonyProviders,
+  type PhoneNumber, type InsertPhoneNumber, phoneNumbers,
+  type Call, type InsertCall, calls,
+  type CallingCampaign, type InsertCallingCampaign, callingCampaigns
 } from "@shared/schema";
 import { db } from "../db";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 import { randomBytes } from "crypto";
 
 export interface IStorage {
@@ -46,6 +50,37 @@ export interface IStorage {
   createFlowEdge(edge: InsertFlowEdge): Promise<FlowEdge>;
   updateFlowEdge(id: string, data: Partial<Omit<FlowEdge, 'id' | 'flowId' | 'createdAt'>>): Promise<FlowEdge | undefined>;
   deleteFlowEdge(id: string): Promise<boolean>;
+  
+  // Telephony Providers
+  getTelephonyProvider(id: string): Promise<TelephonyProvider | undefined>;
+  getAllTelephonyProviders(apiKeyId: string): Promise<TelephonyProvider[]>;
+  getActiveTelephonyProvider(apiKeyId: string): Promise<TelephonyProvider | undefined>;
+  createTelephonyProvider(provider: InsertTelephonyProvider): Promise<TelephonyProvider>;
+  updateTelephonyProvider(id: string, data: Partial<Omit<TelephonyProvider, 'id' | 'apiKeyId' | 'createdAt'>>): Promise<TelephonyProvider | undefined>;
+  deleteTelephonyProvider(id: string): Promise<boolean>;
+  
+  // Phone Numbers
+  getPhoneNumber(id: string): Promise<PhoneNumber | undefined>;
+  getAllPhoneNumbers(providerId: string): Promise<PhoneNumber[]>;
+  getPhoneNumberByNumber(phoneNumber: string): Promise<PhoneNumber | undefined>;
+  createPhoneNumber(phoneNumber: InsertPhoneNumber): Promise<PhoneNumber>;
+  updatePhoneNumber(id: string, data: Partial<Omit<PhoneNumber, 'id' | 'providerId' | 'purchasedAt'>>): Promise<PhoneNumber | undefined>;
+  deletePhoneNumber(id: string): Promise<boolean>;
+  
+  // Calls
+  getCall(id: string): Promise<Call | undefined>;
+  getAllCalls(providerId: string): Promise<Call[]>;
+  getCallsByCampaign(campaignId: string): Promise<Call[]>;
+  createCall(call: InsertCall): Promise<Call>;
+  updateCall(id: string, data: Partial<Omit<Call, 'id' | 'createdAt'>>): Promise<Call | undefined>;
+  
+  // Calling Campaigns
+  getCallingCampaign(id: string): Promise<CallingCampaign | undefined>;
+  getAllCallingCampaigns(apiKeyId: string): Promise<CallingCampaign[]>;
+  createCallingCampaign(campaign: InsertCallingCampaign): Promise<CallingCampaign>;
+  updateCallingCampaign(id: string, data: Partial<Omit<CallingCampaign, 'id' | 'apiKeyId' | 'createdAt'>>): Promise<CallingCampaign | undefined>;
+  deleteCallingCampaign(id: string): Promise<boolean>;
+  incrementCampaignStats(id: string, field: 'completedCalls' | 'successfulCalls' | 'failedCalls'): Promise<void>;
 }
 
 export class DbStorage implements IStorage {
@@ -213,6 +248,154 @@ export class DbStorage implements IStorage {
   async deleteFlowEdge(id: string): Promise<boolean> {
     const result = await db.delete(flowEdges).where(eq(flowEdges.id, id));
     return result.rowCount !== null && result.rowCount > 0;
+  }
+
+  // Telephony Providers
+  async getTelephonyProvider(id: string): Promise<TelephonyProvider | undefined> {
+    const results = await db.select().from(telephonyProviders).where(eq(telephonyProviders.id, id)).limit(1);
+    return results[0];
+  }
+
+  async getAllTelephonyProviders(apiKeyId: string): Promise<TelephonyProvider[]> {
+    return await db.select().from(telephonyProviders).where(eq(telephonyProviders.apiKeyId, apiKeyId));
+  }
+
+  async getActiveTelephonyProvider(apiKeyId: string): Promise<TelephonyProvider | undefined> {
+    const results = await db.select().from(telephonyProviders)
+      .where(and(
+        eq(telephonyProviders.apiKeyId, apiKeyId),
+        eq(telephonyProviders.active, true)
+      ))
+      .limit(1);
+    return results[0];
+  }
+
+  async createTelephonyProvider(insertProvider: InsertTelephonyProvider): Promise<TelephonyProvider> {
+    const results = await db.insert(telephonyProviders).values(insertProvider).returning();
+    return results[0];
+  }
+
+  async updateTelephonyProvider(id: string, data: Partial<Omit<TelephonyProvider, 'id' | 'apiKeyId' | 'createdAt'>>): Promise<TelephonyProvider | undefined> {
+    const result = await db.update(telephonyProviders)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(telephonyProviders.id, id))
+      .returning();
+    
+    return result[0];
+  }
+
+  async deleteTelephonyProvider(id: string): Promise<boolean> {
+    const result = await db.delete(telephonyProviders).where(eq(telephonyProviders.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
+  }
+
+  // Phone Numbers
+  async getPhoneNumber(id: string): Promise<PhoneNumber | undefined> {
+    const results = await db.select().from(phoneNumbers).where(eq(phoneNumbers.id, id)).limit(1);
+    return results[0];
+  }
+
+  async getAllPhoneNumbers(providerId: string): Promise<PhoneNumber[]> {
+    return await db.select().from(phoneNumbers).where(eq(phoneNumbers.providerId, providerId));
+  }
+
+  async getPhoneNumberByNumber(phoneNumberStr: string): Promise<PhoneNumber | undefined> {
+    const results = await db.select().from(phoneNumbers).where(eq(phoneNumbers.phoneNumber, phoneNumberStr)).limit(1);
+    return results[0];
+  }
+
+  async createPhoneNumber(insertPhoneNumber: InsertPhoneNumber): Promise<PhoneNumber> {
+    const results = await db.insert(phoneNumbers).values(insertPhoneNumber).returning();
+    return results[0];
+  }
+
+  async updatePhoneNumber(id: string, data: Partial<Omit<PhoneNumber, 'id' | 'providerId' | 'purchasedAt'>>): Promise<PhoneNumber | undefined> {
+    const result = await db.update(phoneNumbers)
+      .set(data)
+      .where(eq(phoneNumbers.id, id))
+      .returning();
+    
+    return result[0];
+  }
+
+  async deletePhoneNumber(id: string): Promise<boolean> {
+    const result = await db.delete(phoneNumbers).where(eq(phoneNumbers.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
+  }
+
+  // Calls
+  async getCall(id: string): Promise<Call | undefined> {
+    const results = await db.select().from(calls).where(eq(calls.id, id)).limit(1);
+    return results[0];
+  }
+
+  async getAllCalls(providerId: string): Promise<Call[]> {
+    return await db.select().from(calls).where(eq(calls.providerId, providerId));
+  }
+
+  async getCallsByCampaign(campaignId: string): Promise<Call[]> {
+    return await db.select().from(calls).where(eq(calls.campaignId, campaignId));
+  }
+
+  async createCall(insertCall: InsertCall): Promise<Call> {
+    const results = await db.insert(calls).values(insertCall).returning();
+    return results[0];
+  }
+
+  async updateCall(id: string, data: Partial<Omit<Call, 'id' | 'createdAt'>>): Promise<Call | undefined> {
+    const result = await db.update(calls)
+      .set(data)
+      .where(eq(calls.id, id))
+      .returning();
+    
+    return result[0];
+  }
+
+  // Calling Campaigns
+  async getCallingCampaign(id: string): Promise<CallingCampaign | undefined> {
+    const results = await db.select().from(callingCampaigns).where(eq(callingCampaigns.id, id)).limit(1);
+    return results[0];
+  }
+
+  async getAllCallingCampaigns(apiKeyId: string): Promise<CallingCampaign[]> {
+    return await db.select().from(callingCampaigns).where(eq(callingCampaigns.apiKeyId, apiKeyId));
+  }
+
+  async createCallingCampaign(insertCampaign: InsertCallingCampaign): Promise<CallingCampaign> {
+    const results = await db.insert(callingCampaigns).values(insertCampaign).returning();
+    return results[0];
+  }
+
+  async updateCallingCampaign(id: string, data: Partial<Omit<CallingCampaign, 'id' | 'apiKeyId' | 'createdAt'>>): Promise<CallingCampaign | undefined> {
+    const result = await db.update(callingCampaigns)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(callingCampaigns.id, id))
+      .returning();
+    
+    return result[0];
+  }
+
+  async deleteCallingCampaign(id: string): Promise<boolean> {
+    const result = await db.delete(callingCampaigns).where(eq(callingCampaigns.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
+  }
+
+  async incrementCampaignStats(id: string, field: 'completedCalls' | 'successfulCalls' | 'failedCalls'): Promise<void> {
+    const fieldMap = {
+      completedCalls: callingCampaigns.completedCalls,
+      successfulCalls: callingCampaigns.successfulCalls,
+      failedCalls: callingCampaigns.failedCalls,
+    };
+    
+    const dbField = fieldMap[field];
+    const result = await db.update(callingCampaigns)
+      .set({ [field]: sql`${dbField} + 1`, updatedAt: new Date() })
+      .where(eq(callingCampaigns.id, id))
+      .returning();
+    
+    if (result.length === 0) {
+      throw new Error(`Calling campaign ${id} not found - unable to increment ${field}`);
+    }
   }
 }
 
