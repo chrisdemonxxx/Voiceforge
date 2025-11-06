@@ -1,5 +1,6 @@
-import { type ApiKey, type InsertApiKey } from "@shared/schema";
-import { randomUUID } from "crypto";
+import { type ApiKey, type InsertApiKey, apiKeys } from "@shared/schema";
+import { db } from "../db";
+import { eq, sql } from "drizzle-orm";
 import { randomBytes } from "crypto";
 
 export interface IStorage {
@@ -12,84 +13,49 @@ export interface IStorage {
   incrementApiKeyUsage(id: string): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private apiKeys: Map<string, ApiKey>;
-
-  constructor() {
-    this.apiKeys = new Map();
-    
-    // Public demo key for landing page (well-known, no security risk for demo)
-    const publicDemoKey: ApiKey = {
-      id: "public-demo",
-      name: "Public Landing Page Demo",
-      key: "vf_demo_public_key_for_landing_page",
-      createdAt: new Date("2025-01-01"),
-      usage: 0,
-      active: true,
-    };
-    
-    // Create some default API keys for testing
-    const defaultKey1: ApiKey = {
-      id: randomUUID(),
-      name: "Production API",
-      key: "vf_sk_" + randomBytes(16).toString("hex"),
-      createdAt: new Date("2025-01-01"),
-      usage: 8234,
-      active: true,
-    };
-    
-    const defaultKey2: ApiKey = {
-      id: randomUUID(),
-      name: "Development",
-      key: "vf_sk_" + randomBytes(16).toString("hex"),
-      createdAt: new Date("2025-01-15"),
-      usage: 423,
-      active: true,
-    };
-    
-    this.apiKeys.set(publicDemoKey.id, publicDemoKey);
-    this.apiKeys.set(defaultKey1.id, defaultKey1);
-    this.apiKeys.set(defaultKey2.id, defaultKey2);
-  }
-
+export class DbStorage implements IStorage {
   async getApiKey(id: string): Promise<ApiKey | undefined> {
-    return this.apiKeys.get(id);
+    const results = await db.select().from(apiKeys).where(eq(apiKeys.id, id)).limit(1);
+    return results[0];
   }
 
   async getApiKeyByKey(key: string): Promise<ApiKey | undefined> {
-    return Array.from(this.apiKeys.values()).find((apiKey) => apiKey.key === key);
+    const results = await db.select().from(apiKeys).where(eq(apiKeys.key, key)).limit(1);
+    return results[0];
   }
 
   async getAllApiKeys(): Promise<ApiKey[]> {
-    return Array.from(this.apiKeys.values());
+    return await db.select().from(apiKeys);
   }
 
   async createApiKey(insertApiKey: InsertApiKey): Promise<ApiKey> {
-    const id = randomUUID();
     const key = "vf_sk_" + randomBytes(16).toString("hex");
-    const apiKey: ApiKey = {
+    const results = await db.insert(apiKeys).values({
       ...insertApiKey,
-      id,
       key,
-      createdAt: new Date(),
-      usage: 0,
-      active: true,
-    };
-    this.apiKeys.set(id, apiKey);
-    return apiKey;
+    }).returning();
+    return results[0];
   }
 
   async deleteApiKey(id: string): Promise<boolean> {
-    return this.apiKeys.delete(id);
+    const result = await db.delete(apiKeys).where(eq(apiKeys.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
   }
 
   async incrementApiKeyUsage(id: string): Promise<void> {
-    const apiKey = this.apiKeys.get(id);
-    if (apiKey) {
-      apiKey.usage += 1;
-      this.apiKeys.set(id, apiKey);
+    // Atomic SQL increment with returning clause to verify success
+    // This generates: UPDATE api_keys SET usage = usage + 1 WHERE id = ? RETURNING *
+    // The entire operation is atomic at the database level
+    const result = await db.update(apiKeys)
+      .set({ usage: sql`${apiKeys.usage} + 1` })
+      .where(eq(apiKeys.id, id))
+      .returning();
+    
+    // Verify exactly one row was updated
+    if (result.length === 0) {
+      throw new Error(`API key ${id} not found - unable to increment usage`);
     }
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DbStorage();
