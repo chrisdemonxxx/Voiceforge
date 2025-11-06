@@ -35,11 +35,19 @@ The platform adopts a developer-centric aesthetic inspired by platforms like Str
 *   **Voice Activity Detection (VAD)**: Employs Silero VAD for precise, real-time speech segmentation.
 *   **Voice Cloning**: Provides zero-shot cloning with 5-second samples, supported by Chatterbox and Higgs Audio V2.
 *   **VLLM Integration**: Enables voice-enabled conversational AI using Llama 3.3 / Qwen 2.5 models.
+*   **Real-time Gateway**: WebSocket-based dual-mode interface (voice/text/hybrid) for low-latency conversational AI
+    - **Voice Mode**: STT → VLLM agent → TTS pipeline with streaming audio chunks
+    - **Text Mode**: Direct text input → VLLM agent → TTS pipeline with streaming responses
+    - **Hybrid Mode**: Supports both voice and text input with unified agent processing
+    - **Authentication**: Requires valid, active API key in WebSocket init message
+    - **Metrics**: Real-time latency tracking (STT, agent, TTS, end-to-end) with quality feedback
 *   **Platform Features**: Includes API key management with usage tracking, real-time WebSocket streaming, usage analytics, rate limiting, authentication, and multi-format audio conversion.
 
 ### System Design Choices
 *   **Database Architecture**: PostgreSQL with Drizzle ORM ensures production-grade persistence for API keys, usage tracking, and rate limits, utilizing atomic SQL operations and Neon serverless for scalability. The system auto-seeds default API keys on first startup to ensure immediate functionality.
 *   **Authentication System**: Database-backed API key management with Bearer token authentication on all protected routes. The dashboard fetches real API keys from the database and dynamically injects them into all authenticated requests (TTS, voice cloning, voice management). API keys are cryptographically generated with per-key rate limiting enforced at the middleware level.
+    - **API Key Management**: CRUD operations for API keys with toggle activation/deactivation, real-time usage statistics from authenticated endpoints, and visual warnings when no active keys exist
+    - **Realtime Gateway Authentication**: WebSocket connections require valid, active API key in init message; connections are rejected with error codes 4001 (invalid) or 4002 (inactive)
 *   **Python ML Services Integration**: A unified worker pool architecture manages all ML services (STT, TTS, HF_TTS, VLLM) through persistent Python processes to minimize cold start latency. This design uses multiprocessing for task distribution, health checks, and automatic worker restarts. Communication with Python services occurs via JSON over stdin/stdout.
     - **STT Workers** (2 processes): Streaming transcription with partial results, VAD, confidence scoring, and timestamp alignment, achieving 30-60ms latency per chunk
     - **TTS Workers** (2 processes): Base model synthesis (Chatterbox, Higgs Audio V2, StyleTTS2) with formant-based voice generation
