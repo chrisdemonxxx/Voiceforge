@@ -106,6 +106,129 @@ export default function Dashboard() {
     });
   };
 
+  // Voice cloning mutation
+  const cloneVoiceMutation = useMutation({
+    mutationFn: async (data: { name: string; model: string; description?: string; file: File }) => {
+      const formData = new FormData();
+      formData.append("name", data.name);
+      formData.append("model", data.model);
+      if (data.description) {
+        formData.append("description", data.description);
+      }
+      formData.append("reference", data.file);
+
+      const response = await fetch("/api/clone-voice", {
+        method: "POST",
+        body: formData,
+        headers: {
+          "Authorization": "Bearer vf_sk_demo_key_1",
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to clone voice");
+      }
+
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Voice cloned successfully",
+        description: `${data.name} is ready to use`,
+      });
+      // Reset form
+      setCloneName("");
+      setCloneDescription("");
+      setReferenceFile(null);
+      // Invalidate voices list
+      queryClient.invalidateQueries({ queryKey: ["/api/voices"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Voice cloning failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCloneVoice = () => {
+    if (!cloneName.trim()) {
+      toast({
+        title: "Name required",
+        description: "Please provide a name for your voice",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!referenceFile) {
+      toast({
+        title: "Reference audio required",
+        description: "Please upload a reference audio file",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    cloneVoiceMutation.mutate({
+      name: cloneName,
+      model: cloneModel,
+      description: cloneDescription,
+      file: referenceFile,
+    });
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setReferenceFile(file);
+      toast({
+        title: "File selected",
+        description: file.name,
+      });
+    }
+  };
+
+  // Fetch cloned voices
+  const { data: clonedVoices, isLoading: voicesLoading } = useQuery({
+    queryKey: ["/api/voices"],
+  });
+
+  // Delete voice mutation
+  const deleteVoiceMutation = useMutation({
+    mutationFn: async (voiceId: string) => {
+      const response = await fetch(`/api/voices/${voiceId}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": "Bearer vf_sk_demo_key_1",
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to delete voice");
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Voice deleted",
+        description: "The cloned voice has been deleted",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/voices"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to delete voice",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return (
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
@@ -355,7 +478,20 @@ export default function Dashboard() {
                       <Input
                         id="clone-name"
                         placeholder="e.g., My Custom Voice"
+                        value={cloneName}
+                        onChange={(e) => setCloneName(e.target.value)}
                         data-testid="input-clone-name"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="clone-description">Description (optional)</Label>
+                      <Input
+                        id="clone-description"
+                        placeholder="e.g., Professional male voice"
+                        value={cloneDescription}
+                        onChange={(e) => setCloneDescription(e.target.value)}
+                        data-testid="input-clone-description"
                       />
                     </div>
 
@@ -363,18 +499,30 @@ export default function Dashboard() {
                       <Label>Reference Audio (5+ seconds)</Label>
                       <div className="border-2 border-dashed border-border rounded-lg p-6 text-center">
                         <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                        <p className="text-sm text-muted-foreground">
-                          Upload a clear 5-10 second audio sample
+                        <p className="text-sm text-muted-foreground mb-2">
+                          {referenceFile ? referenceFile.name : "Upload a clear 5-10 second audio sample"}
                         </p>
-                        <Button className="mt-4" variant="outline" data-testid="button-upload-reference">
-                          Select File
+                        <input
+                          type="file"
+                          accept="audio/*"
+                          onChange={handleFileSelect}
+                          className="hidden"
+                          id="file-upload-clone"
+                        />
+                        <Button 
+                          className="mt-2" 
+                          variant="outline" 
+                          onClick={() => document.getElementById("file-upload-clone")?.click()}
+                          data-testid="button-upload-reference"
+                        >
+                          {referenceFile ? "Change File" : "Select File"}
                         </Button>
                       </div>
                     </div>
 
                     <div className="space-y-2">
                       <Label>Model</Label>
-                      <Select defaultValue="chatterbox">
+                      <Select value={cloneModel} onValueChange={setCloneModel}>
                         <SelectTrigger data-testid="select-clone-model">
                           <SelectValue />
                         </SelectTrigger>
@@ -385,12 +533,78 @@ export default function Dashboard() {
                       </Select>
                     </div>
 
-                    <Button className="w-full" data-testid="button-create-voice">
-                      Create Voice Clone
+                    <Button 
+                      className="w-full" 
+                      onClick={handleCloneVoice}
+                      disabled={cloneVoiceMutation.isPending}
+                      data-testid="button-create-voice"
+                    >
+                      {cloneVoiceMutation.isPending ? "Cloning Voice..." : "Create Voice Clone"}
                     </Button>
                   </div>
                 </TabsContent>
               </Tabs>
+            </CardContent>
+          </Card>
+
+          {/* Cloned Voices Management */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Cloned Voices</CardTitle>
+              <CardDescription>
+                Manage your custom cloned voices
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {voicesLoading ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  Loading voices...
+                </div>
+              ) : !clonedVoices || clonedVoices.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No cloned voices yet. Create one in the Voice Testing tab above.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {clonedVoices.map((voice: any) => (
+                    <div
+                      key={voice.id}
+                      className="flex items-center justify-between p-4 border border-card-border rounded-lg hover-elevate"
+                      data-testid={`voice-${voice.id}`}
+                    >
+                      <div className="space-y-1 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-foreground">{voice.name}</p>
+                          <Badge variant="secondary">
+                            {voice.model === "chatterbox" ? "Chatterbox" : "Higgs Audio V2"}
+                          </Badge>
+                          <Badge 
+                            variant={voice.status === "ready" ? "default" : "secondary"}
+                            className={voice.status === "ready" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" : ""}
+                          >
+                            {voice.status}
+                          </Badge>
+                        </div>
+                        {voice.description && (
+                          <p className="text-sm text-muted-foreground">{voice.description}</p>
+                        )}
+                        <div className="text-xs text-muted-foreground">
+                          Created {new Date(voice.createdAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => deleteVoiceMutation.mutate(voice.id)}
+                        disabled={deleteVoiceMutation.isPending}
+                        data-testid={`button-delete-voice-${voice.id}`}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 

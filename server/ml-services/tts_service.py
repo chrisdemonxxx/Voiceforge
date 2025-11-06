@@ -23,7 +23,7 @@ import base64
 import numpy as np
 import wave
 import io
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class TTSService:
     def __init__(self):
@@ -56,7 +56,7 @@ class TTSService:
         
         return header.getvalue() + audio_data
 
-    def synthesize(self, text: str, model: str, voice: str = None, speed: float = 1.0) -> bytes:
+    def synthesize(self, text: str, model: str, voice: Optional[str] = None, speed: float = 1.0, voice_characteristics: Optional[dict] = None) -> bytes:
         """
         Synthesize speech from text
         
@@ -65,6 +65,7 @@ class TTSService:
             model: Model to use (chatterbox, higgs_audio_v2, styletts2)
             voice: Optional voice ID or characteristics
             speed: Speech speed (0.5 to 2.0)
+            voice_characteristics: Optional voice characteristics from cloned voice
         
         Returns:
             Audio data as bytes (WAV format with header)
@@ -83,8 +84,15 @@ class TTSService:
         # Generate speech-like formant synthesis
         t = np.linspace(0, duration, num_samples)
         
-        # Fundamental frequency varies (makes it sound more natural)
-        f0_base = 150 if voice and 'male' in voice.lower() else 220
+        # Use voice characteristics if available (from cloned voice)
+        if voice_characteristics:
+            f0_base = voice_characteristics.get('fundamental_frequency', 150)
+            formants = voice_characteristics.get('formants', {'f1': 700, 'f2': 1220, 'f3': 2600})
+        else:
+            # Fundamental frequency varies (makes it sound more natural)
+            f0_base = 150 if voice and 'male' in voice.lower() else 220
+            formants = {'f1': 700, 'f2': 1220, 'f3': 2600}
+        
         f0 = f0_base + 20 * np.sin(2 * np.pi * 3 * t)  # Pitch variation
         
         # Generate formants (speech resonances)
@@ -135,9 +143,10 @@ def main():
             model = request.get("model", "chatterbox")
             voice = request.get("voice")
             speed = request.get("speed", 1.0)
+            voice_characteristics = request.get("voice_characteristics")
             
             # Generate audio
-            audio_bytes = service.synthesize(text, model, voice, speed)
+            audio_bytes = service.synthesize(text, model, voice, speed, voice_characteristics)
             
             # Encode to base64 for JSON transport
             audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
