@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Mic2,
   Key,
@@ -35,6 +36,12 @@ export default function Dashboard() {
   const [selectedModel, setSelectedModel] = useState("chatterbox");
   const [ttsText, setTtsText] = useState("");
   const [generatedAudio, setGeneratedAudio] = useState<string | null>(null);
+  
+  // Voice cloning state
+  const [cloneName, setCloneName] = useState("");
+  const [cloneModel, setCloneModel] = useState("chatterbox");
+  const [cloneDescription, setCloneDescription] = useState("");
+  const [referenceFile, setReferenceFile] = useState<File | null>(null);
 
   // Mock data - will be replaced with real API calls
   const stats: UsageStats = {

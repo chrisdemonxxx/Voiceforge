@@ -193,23 +193,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const data = voiceCloneRequestSchema.parse(req.body);
+      const apiKey = (req as any).apiKey;
       
-      // Mock voice cloning - will be replaced with Chatterbox/Higgs Audio
-      const voiceId = `voice_${Date.now()}`;
+      // Analyze the reference audio to extract voice characteristics
+      const analysis = await pythonBridge.analyzeVoice(req.file.buffer);
       
-      res.json({
-        id: voiceId,
+      if (!analysis.success) {
+        return res.status(400).json({ 
+          error: "Failed to analyze reference audio",
+          details: analysis.error 
+        });
+      }
+      
+      // Save reference audio to filesystem
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const uploadsDir = path.join(process.cwd(), "uploads", "voices");
+      await fs.mkdir(uploadsDir, { recursive: true });
+      
+      const audioFileName = `voice_${Date.now()}_${Math.random().toString(36).substring(7)}.wav`;
+      const audioFilePath = path.join(uploadsDir, audioFileName);
+      await fs.writeFile(audioFilePath, req.file.buffer);
+      
+      // Create cloned voice in database
+      const clonedVoice = await storage.createClonedVoice({
+        apiKeyId: apiKey.id,
         name: data.name,
         model: data.model,
-        status: "processing",
-        message: "Voice cloning initiated. This may take a few minutes.",
+        description: data.description,
+        referenceAudioPath: `uploads/voices/${audioFileName}`,
+        voiceCharacteristics: analysis.characteristics,
+        status: "ready",
+      });
+      
+      res.json({
+        id: clonedVoice.id,
+        name: clonedVoice.name,
+        model: clonedVoice.model,
+        status: clonedVoice.status,
+        createdAt: clonedVoice.createdAt,
+        characteristics: clonedVoice.voiceCharacteristics,
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ error: "Invalid input", details: error.errors });
       } else {
+        console.error("[Voice Cloning] Error:", error);
         res.status(500).json({ error: error.message });
       }
+    }
+  });
+
+  // List Cloned Voices
+  app.get("/api/voices", authenticateApiKey, async (req, res) => {
+    try {
+      const apiKey = (req as any).apiKey;
+      const voices = await storage.getAllClonedVoices(apiKey.id);
+      res.json(voices);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get Single Cloned Voice
+  app.get("/api/voices/:id", authenticateApiKey, async (req, res) => {
+    try {
+      const voice = await storage.getClonedVoice(req.params.id);
+      if (!voice) {
+        return res.status(404).json({ error: "Voice not found" });
+      }
+      res.json(voice);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete Cloned Voice
+  app.delete("/api/voices/:id", authenticateApiKey, async (req, res) => {
+    try {
+      const voice = await storage.getClonedVoice(req.params.id);
+      if (!voice) {
+        return res.status(404).json({ error: "Voice not found" });
+      }
+
+      // Delete the reference audio file
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const audioPath = path.join(process.cwd(), voice.referenceAudioPath);
+      
+      try {
+        await fs.unlink(audioPath);
+      } catch (error) {
+        console.warn("[Voice Delete] Failed to delete audio file:", error);
+      }
+
+      // Delete from database
+      const success = await storage.deleteClonedVoice(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Voice not found" });
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 
