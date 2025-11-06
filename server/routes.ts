@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { rateLimiter } from "./rate-limiter";
 import { pythonBridge } from "./python-bridge";
 import { RealTimeGateway } from "./realtime-gateway";
+import { TelephonySignaling } from "./telephony-signaling";
 import { generateAgentFlow } from "./services/ai-flow-generator";
 import multer from "multer";
 import { z } from "zod";
@@ -588,6 +589,9 @@ Return as JSON array of 3 variations.`;
   // Real-Time Gateway for Voice AI Playground
   const realTimeGateway = new RealTimeGateway(httpServer, "/ws/realtime");
   
+  // Telephony Signaling for WebRTC Calls
+  const telephonySignaling = new TelephonySignaling(httpServer, "/ws/telephony");
+  
   // Metrics endpoint for real-time gateway
   app.get("/api/realtime/metrics", (req, res) => {
     res.json(realTimeGateway.getMetrics());
@@ -769,6 +773,200 @@ Return as JSON array of 3 variations.`;
       }
       
       res.json(createdEdges);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================== TELEPHONY ROUTES ====================
+  
+  // Telephony Providers
+  app.get("/api/telephony/providers", authenticateApiKey, async (req, res) => {
+    try {
+      const apiKey = (req as any).apiKey;
+      const provider = await storage.getActiveTelephonyProvider(apiKey.id);
+      res.json(provider || null);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/telephony/providers", authenticateApiKey, async (req, res) => {
+    try {
+      const apiKey = (req as any).apiKey;
+      const provider = await storage.createTelephonyProvider({
+        apiKeyId: apiKey.id,
+        provider: req.body.provider,
+        name: req.body.name,
+        credentials: req.body.credentials,
+        configuration: req.body.configuration,
+      });
+      res.json(provider);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/telephony/providers/:id", authenticateApiKey, async (req, res) => {
+    try {
+      const provider = await storage.updateTelephonyProvider(req.params.id, req.body);
+      if (!provider) {
+        return res.status(404).json({ error: "Provider not found" });
+      }
+      res.json(provider);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/telephony/providers/:id", authenticateApiKey, async (req, res) => {
+    try {
+      const success = await storage.deleteTelephonyProvider(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Provider not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Phone Numbers
+  app.get("/api/telephony/numbers", authenticateApiKey, async (req, res) => {
+    try {
+      const apiKey = (req as any).apiKey;
+      const provider = await storage.getActiveTelephonyProvider(apiKey.id);
+      if (!provider) {
+        return res.json([]);
+      }
+      const numbers = await storage.getAllPhoneNumbers(provider.id);
+      res.json(numbers);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/telephony/numbers", authenticateApiKey, async (req, res) => {
+    try {
+      const number = await storage.createPhoneNumber({
+        providerId: req.body.providerId,
+        phoneNumber: req.body.phoneNumber,
+        friendlyName: req.body.friendlyName,
+        country: req.body.country,
+        capabilities: req.body.capabilities,
+      });
+      res.json(number);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/telephony/numbers/:id", authenticateApiKey, async (req, res) => {
+    try {
+      const number = await storage.updatePhoneNumber(req.params.id, req.body);
+      if (!number) {
+        return res.status(404).json({ error: "Phone number not found" });
+      }
+      res.json(number);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/telephony/numbers/:id", authenticateApiKey, async (req, res) => {
+    try {
+      const success = await storage.deletePhoneNumber(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Phone number not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Calls
+  app.get("/api/telephony/calls", authenticateApiKey, async (req, res) => {
+    try {
+      const apiKey = (req as any).apiKey;
+      const calls = await storage.getCallsByApiKey(apiKey.id);
+      res.json(calls);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/telephony/calls/:id", authenticateApiKey, async (req, res) => {
+    try {
+      const call = await storage.getCall(req.params.id);
+      if (!call) {
+        return res.status(404).json({ error: "Call not found" });
+      }
+      res.json(call);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Calling Campaigns
+  app.get("/api/telephony/campaigns", authenticateApiKey, async (req, res) => {
+    try {
+      const apiKey = (req as any).apiKey;
+      const campaigns = await storage.getAllCallingCampaigns(apiKey.id);
+      res.json(campaigns);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/telephony/campaigns/:id", authenticateApiKey, async (req, res) => {
+    try {
+      const campaign = await storage.getCallingCampaign(req.params.id);
+      if (!campaign) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
+      res.json(campaign);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/telephony/campaigns", authenticateApiKey, async (req, res) => {
+    try {
+      const apiKey = (req as any).apiKey;
+      const campaign = await storage.createCallingCampaign({
+        apiKeyId: apiKey.id,
+        providerId: req.body.providerId,
+        name: req.body.name,
+        phoneList: req.body.phoneNumbers,
+        flowId: req.body.flowId,
+        description: req.body.description,
+      });
+      res.json(campaign);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/telephony/campaigns/:id", authenticateApiKey, async (req, res) => {
+    try {
+      const campaign = await storage.updateCallingCampaign(req.params.id, req.body);
+      if (!campaign) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
+      res.json(campaign);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/telephony/campaigns/:id", authenticateApiKey, async (req, res) => {
+    try {
+      const success = await storage.deleteCallingCampaign(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

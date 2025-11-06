@@ -70,6 +70,7 @@ export interface IStorage {
   // Calls
   getCall(id: string): Promise<Call | undefined>;
   getAllCalls(providerId: string): Promise<Call[]>;
+  getCallsByApiKey(apiKeyId: string): Promise<Call[]>;
   getCallsByCampaign(campaignId: string): Promise<Call[]>;
   createCall(call: InsertCall): Promise<Call>;
   updateCall(id: string, data: Partial<Omit<Call, 'id' | 'createdAt'>>): Promise<Call | undefined>;
@@ -331,6 +332,17 @@ export class DbStorage implements IStorage {
 
   async getAllCalls(providerId: string): Promise<Call[]> {
     return await db.select().from(calls).where(eq(calls.providerId, providerId));
+  }
+
+  async getCallsByApiKey(apiKeyId: string): Promise<Call[]> {
+    // Join calls with telephony providers to filter by API key
+    const results = await db
+      .select({ call: calls })
+      .from(calls)
+      .innerJoin(telephonyProviders, eq(calls.providerId, telephonyProviders.id))
+      .where(eq(telephonyProviders.apiKeyId, apiKeyId));
+    
+    return results.map(r => r.call);
   }
 
   async getCallsByCampaign(campaignId: string): Promise<Call[]> {

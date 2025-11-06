@@ -320,3 +320,6 @@ export class TelephonyService {
     return `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 }
+
+// Export singleton instance
+export const telephonyService = new TelephonyService();
