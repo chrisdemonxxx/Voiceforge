@@ -61,14 +61,38 @@ interface ConnectionInfo {
   messageCount: number;
 }
 
+// Advanced metrics tracking
+interface MetricsSample {
+  timestamp: number;
+  stt: number;
+  agent: number;
+  tts: number;
+  e2e: number;
+  queueDepth: number;
+  activeConnections: number;
+  errorStage?: 'stt' | 'agent' | 'tts' | null;
+}
+
+interface QualityFeedback {
+  timestamp: number;
+  category: 'stt_accuracy' | 'tts_quality' | 'latency' | 'overall';
+  score: number;
+  eventId: string;
+}
+
 // Real-time gateway for voice AI playground
 export class RealTimeGateway {
   private wss: WebSocketServer;
   private sessions: SessionManager;
   private connections: Map<WebSocket, ConnectionInfo> = new Map();
   private latencyTracking: Map<string, { start: number; stages: Record<string, number> }> = new Map();
-  private latencyHistory: Array<{ timestamp: number; stt: number; agent: number; tts: number; e2e: number }> = [];
-  private readonly MAX_LATENCY_HISTORY = 100;
+  
+  // Enhanced metrics storage
+  private metricsHistory: MetricsSample[] = [];
+  private qualityFeedback: QualityFeedback[] = [];
+  private errorCounts: { stt: number; agent: number; tts: number } = { stt: 0, agent: 0, tts: 0 };
+  private queueDepthHistory: Array<{ timestamp: number; depth: number }> = [];
+  private readonly MAX_HISTORY_SIZE = 1000;
   
   constructor(httpServer: Server, path: string = "/ws/realtime") {
     this.wss = new WebSocketServer({ server: httpServer, path });
@@ -394,19 +418,17 @@ export class RealTimeGateway {
       },
     });
     
-    // Store latency metrics for historical tracking
-    this.latencyHistory.push({
+    // Store comprehensive metrics sample
+    this.addMetricsSample({
       timestamp: Date.now(),
       stt: sttProcessingTime,
       agent: agentProcessingTime,
       tts: ttsProcessingTime,
       e2e: totalLatency,
+      queueDepth: this.getCurrentQueueDepth(),
+      activeConnections: this.connections.size,
+      errorStage: null,
     });
-    
-    // Keep only last MAX_LATENCY_HISTORY entries
-    if (this.latencyHistory.length > this.MAX_LATENCY_HISTORY) {
-      this.latencyHistory.shift();
-    }
     
     // Update session stats
     const session = this.sessions.getSession(conn.sessionId);
@@ -539,7 +561,19 @@ export class RealTimeGateway {
       score: message.score,
       comment: message.comment,
     });
-    // TODO: Store feedback in database for analytics
+    
+    // Store quality feedback
+    this.qualityFeedback.push({
+      timestamp: Date.now(),
+      category: message.category,
+      score: message.score,
+      eventId: message.eventId,
+    });
+    
+    // Keep only last MAX_HISTORY_SIZE entries
+    if (this.qualityFeedback.length > this.MAX_HISTORY_SIZE) {
+      this.qualityFeedback.shift();
+    }
   }
   
   private sendMessage(ws: WebSocket, message: WSServerMessage) {
@@ -582,41 +616,143 @@ export class RealTimeGateway {
     return endTime - tracking.start;
   }
   
-  // Metrics endpoint helper
+  // Helper methods for metrics tracking
+  private addMetricsSample(sample: MetricsSample) {
+    this.metricsHistory.push(sample);
+    
+    // Keep only last MAX_HISTORY_SIZE entries
+    if (this.metricsHistory.length > this.MAX_HISTORY_SIZE) {
+      this.metricsHistory.shift();
+    }
+    
+    // Track error if present
+    if (sample.errorStage) {
+      this.errorCounts[sample.errorStage]++;
+    }
+  }
+  
+  private getCurrentQueueDepth(): number {
+    // Simulated queue depth based on active connections
+    return Math.max(0, this.connections.size - 2);
+  }
+  
+  private calculatePercentile(values: number[], percentile: number): number {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const index = Math.ceil((percentile / 100) * sorted.length) - 1;
+    return sorted[Math.max(0, index)];
+  }
+  
+  private calculateTrend(values: number[]): 'improving' | 'degrading' | 'stable' {
+    if (values.length < 10) return 'stable';
+    
+    const recentHalf = values.slice(-Math.floor(values.length / 2));
+    const olderHalf = values.slice(0, Math.floor(values.length / 2));
+    
+    const recentAvg = recentHalf.reduce((a, b) => a + b, 0) / recentHalf.length;
+    const olderAvg = olderHalf.reduce((a, b) => a + b, 0) / olderHalf.length;
+    
+    const change = ((recentAvg - olderAvg) / olderAvg) * 100;
+    
+    if (change < -5) return 'improving'; // Lower latency is better
+    if (change > 5) return 'degrading';
+    return 'stable';
+  }
+  
+  // Enhanced metrics endpoint helper
   public getMetrics() {
-    // Calculate average latencies from history
-    const calculateAvg = (field: 'stt' | 'agent' | 'tts' | 'e2e') => {
-      if (this.latencyHistory.length === 0) return null;
-      const sum = this.latencyHistory.reduce((acc, entry) => acc + entry[field], 0);
-      return Math.round(sum / this.latencyHistory.length);
+    const sttValues = this.metricsHistory.map(m => m.stt);
+    const agentValues = this.metricsHistory.map(m => m.agent);
+    const ttsValues = this.metricsHistory.map(m => m.tts);
+    const e2eValues = this.metricsHistory.map(m => m.e2e);
+    
+    const calculateStats = (values: number[], label: string) => {
+      if (values.length === 0) {
+        return {
+          avg: null,
+          min: null,
+          max: null,
+          p50: null,
+          p95: null,
+          p99: null,
+          trend: 'stable' as const,
+        };
+      }
+      
+      const sum = values.reduce((a, b) => a + b, 0);
+      return {
+        avg: Math.round(sum / values.length),
+        min: Math.min(...values),
+        max: Math.max(...values),
+        p50: this.calculatePercentile(values, 50),
+        p95: this.calculatePercentile(values, 95),
+        p99: this.calculatePercentile(values, 99),
+        trend: this.calculateTrend(values),
+      };
     };
     
-    // Get last 10 entries for recent trends
-    const recent = this.latencyHistory.slice(-10);
+    // Calculate quality scores
+    const qualityByCategory = {
+      stt_accuracy: this.qualityFeedback.filter(f => f.category === 'stt_accuracy'),
+      tts_quality: this.qualityFeedback.filter(f => f.category === 'tts_quality'),
+      latency: this.qualityFeedback.filter(f => f.category === 'latency'),
+      overall: this.qualityFeedback.filter(f => f.category === 'overall'),
+    };
+    
+    const calculateQualityAvg = (feedback: QualityFeedback[]) => {
+      if (feedback.length === 0) return null;
+      const sum = feedback.reduce((a, b) => a + b.score, 0);
+      return (sum / feedback.length).toFixed(2);
+    };
     
     return {
       activeConnections: this.connections.size,
       activeSessions: this.sessions.getActiveSessionCount(),
-      totalConnections: this.connections.size,
+      queueDepth: this.getCurrentQueueDepth(),
+      
       latency: {
-        stt: {
-          avg: calculateAvg('stt'),
-          recent: recent.map(e => e.stt),
-        },
-        agent: {
-          avg: calculateAvg('agent'),
-          recent: recent.map(e => e.agent),
-        },
-        tts: {
-          avg: calculateAvg('tts'),
-          recent: recent.map(e => e.tts),
-        },
-        endToEnd: {
-          avg: calculateAvg('e2e'),
-          recent: recent.map(e => e.e2e),
-        },
+        stt: calculateStats(sttValues, 'STT'),
+        agent: calculateStats(agentValues, 'Agent'),
+        tts: calculateStats(ttsValues, 'TTS'),
+        endToEnd: calculateStats(e2eValues, 'End-to-End'),
       },
-      historyCount: this.latencyHistory.length,
+      
+      errors: {
+        stt: this.errorCounts.stt,
+        agent: this.errorCounts.agent,
+        tts: this.errorCounts.tts,
+        total: this.errorCounts.stt + this.errorCounts.agent + this.errorCounts.tts,
+      },
+      
+      quality: {
+        sttAccuracy: calculateQualityAvg(qualityByCategory.stt_accuracy),
+        ttsQuality: calculateQualityAvg(qualityByCategory.tts_quality),
+        latencyRating: calculateQualityAvg(qualityByCategory.latency),
+        overall: calculateQualityAvg(qualityByCategory.overall),
+        feedbackCount: this.qualityFeedback.length,
+      },
+      
+      samplesCount: this.metricsHistory.length,
+    };
+  }
+  
+  // Get full metrics history for charts
+  public getMetricsHistory() {
+    return {
+      samples: this.metricsHistory.map(m => ({
+        timestamp: m.timestamp,
+        stt: m.stt,
+        agent: m.agent,
+        tts: m.tts,
+        e2e: m.e2e,
+        queueDepth: m.queueDepth,
+        activeConnections: m.activeConnections,
+      })),
+      quality: this.qualityFeedback.map(f => ({
+        timestamp: f.timestamp,
+        category: f.category,
+        score: f.score,
+      })),
     };
   }
 }

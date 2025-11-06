@@ -265,6 +265,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(realTimeGateway.getMetrics());
   });
   
+  // Metrics history endpoint for charts and export
+  app.get("/api/realtime/metrics/history", (req, res) => {
+    const format = req.query.format as string || 'json';
+    const history = realTimeGateway.getMetricsHistory();
+    
+    if (format === 'csv') {
+      // Convert to CSV format
+      const csvHeader = 'timestamp,stt,agent,tts,e2e,queueDepth,activeConnections\n';
+      const csvRows = history.samples.map(s => 
+        `${s.timestamp},${s.stt},${s.agent},${s.tts},${s.e2e},${s.queueDepth},${s.activeConnections}`
+      ).join('\n');
+      
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=metrics-history.csv');
+      res.send(csvHeader + csvRows);
+    } else {
+      res.json(history);
+    }
+  });
+  
   // WebSocket Server for Real-time Streaming (legacy)
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
