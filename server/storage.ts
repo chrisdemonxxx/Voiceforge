@@ -1,4 +1,4 @@
-import { type ApiKey, type InsertApiKey, apiKeys } from "@shared/schema";
+import { type ApiKey, type InsertApiKey, apiKeys, type ClonedVoice, type InsertClonedVoice, clonedVoices } from "@shared/schema";
 import { db } from "../db";
 import { eq, sql } from "drizzle-orm";
 import { randomBytes } from "crypto";
@@ -11,6 +11,13 @@ export interface IStorage {
   createApiKey(apiKey: InsertApiKey): Promise<ApiKey>;
   deleteApiKey(id: string): Promise<boolean>;
   incrementApiKeyUsage(id: string): Promise<void>;
+  
+  // Cloned Voices
+  getClonedVoice(id: string): Promise<ClonedVoice | undefined>;
+  getAllClonedVoices(apiKeyId: string): Promise<ClonedVoice[]>;
+  createClonedVoice(voice: InsertClonedVoice): Promise<ClonedVoice>;
+  deleteClonedVoice(id: string): Promise<boolean>;
+  updateClonedVoiceStatus(id: string, status: string): Promise<void>;
 }
 
 export class DbStorage implements IStorage {
@@ -54,6 +61,36 @@ export class DbStorage implements IStorage {
     // Verify exactly one row was updated
     if (result.length === 0) {
       throw new Error(`API key ${id} not found - unable to increment usage`);
+    }
+  }
+
+  async getClonedVoice(id: string): Promise<ClonedVoice | undefined> {
+    const results = await db.select().from(clonedVoices).where(eq(clonedVoices.id, id)).limit(1);
+    return results[0];
+  }
+
+  async getAllClonedVoices(apiKeyId: string): Promise<ClonedVoice[]> {
+    return await db.select().from(clonedVoices).where(eq(clonedVoices.apiKeyId, apiKeyId));
+  }
+
+  async createClonedVoice(insertVoice: InsertClonedVoice): Promise<ClonedVoice> {
+    const results = await db.insert(clonedVoices).values(insertVoice).returning();
+    return results[0];
+  }
+
+  async deleteClonedVoice(id: string): Promise<boolean> {
+    const result = await db.delete(clonedVoices).where(eq(clonedVoices.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
+  }
+
+  async updateClonedVoiceStatus(id: string, status: string): Promise<void> {
+    const result = await db.update(clonedVoices)
+      .set({ status })
+      .where(eq(clonedVoices.id, id))
+      .returning();
+    
+    if (result.length === 0) {
+      throw new Error(`Cloned voice ${id} not found - unable to update status`);
     }
   }
 }
