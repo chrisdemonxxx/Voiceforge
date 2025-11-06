@@ -39,6 +39,7 @@ class WorkerType(Enum):
     STT = "stt"
     TTS = "tts"
     VLLM = "vllm"
+    HF_TTS = "hf_tts"
 
 
 @dataclass
@@ -100,6 +101,10 @@ class Worker:
                 from tts_streaming import StreamingTTSService
                 service = StreamingTTSService()
                 print(f"[Worker {self.worker_id}] TTS streaming service initialized", file=sys.stderr, flush=True)
+            elif self.worker_type == WorkerType.HF_TTS:
+                from hf_tts_service import HFTTSService
+                service = HFTTSService()
+                print(f"[Worker {self.worker_id}] HF TTS service initialized", file=sys.stderr, flush=True)
             elif self.worker_type == WorkerType.VLLM:
                 from vllm_service import VLLMAgentService
                 service = VLLMAgentService()
@@ -166,6 +171,19 @@ class Worker:
             import base64
             return {
                 "audio": base64.b64encode(audio_bytes).decode('utf-8')
+            }
+        elif self.worker_type == WorkerType.HF_TTS:
+            # HF TTS task processing
+            audio_bytes = service.synthesize(
+                text=task.data.get("text", ""),
+                model=task.data.get("model", "parler_tts_multilingual"),
+                voice_prompt=task.data.get("voice_prompt", "A clear and natural voice")
+            )
+            import base64
+            return {
+                "audio": base64.b64encode(audio_bytes).decode('utf-8'),
+                "format": "wav",
+                "sample_rate": 44100
             }
         elif self.worker_type == WorkerType.VLLM:
             # VLLM agent task processing
@@ -328,7 +346,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="ML Worker Pool")
     parser.add_argument("--workers", type=int, default=2, help="Number of workers")
-    parser.add_argument("--worker-type", type=str, choices=["stt", "tts", "vllm"], default="stt")
+    parser.add_argument("--worker-type", type=str, choices=["stt", "tts", "hf_tts", "vllm"], default="stt")
     args = parser.parse_args()
     
     worker_type = WorkerType(args.worker_type)

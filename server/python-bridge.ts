@@ -94,7 +94,7 @@ interface WorkerPoolMetrics {
   worker_utilization: number;
 }
 
-type WorkerType = "stt" | "tts" | "vllm";
+type WorkerType = "stt" | "tts" | "hf_tts" | "vllm";
 
 class WorkerPool {
   private process: ChildProcess | null = null;
@@ -372,6 +372,7 @@ export class PythonBridge {
   private pythonPath: string;
   private sttPool: WorkerPool | null = null;
   private ttsPool: WorkerPool | null = null;
+  private hfTtsPool: WorkerPool | null = null;
   private vllmPool: WorkerPool | null = null;
   
   constructor() {
@@ -389,6 +390,10 @@ export class PythonBridge {
     // Start TTS worker pool (2 workers)
     this.ttsPool = new WorkerPool("tts", 2);
     await this.ttsPool.start();
+    
+    // Start HF TTS worker pool (2 workers for Hugging Face API calls)
+    this.hfTtsPool = new WorkerPool("hf_tts", 2);
+    await this.hfTtsPool.start();
     
     // Start VLLM worker pool (1 worker for now, can scale up)
     this.vllmPool = new WorkerPool("vllm", 1);
@@ -478,169 +483,85 @@ export class PythonBridge {
   }
   
   private async callHuggingFaceTTS(request: TTSRequest): Promise<Buffer> {
-    const scriptPath = path.join(__dirname, "ml-services", "huggingface_tts_service.py");
+    if (!this.hfTtsPool) {
+      throw new Error("HF TTS worker pool not initialized");
+    }
     
-    return new Promise(async (resolve, reject) => {
-      const python = spawn(this.pythonPath, [scriptPath]);
-      
-      let stdoutData = "";
-      let stderrData = "";
-
-      if (!python.stdout || !python.stdin || !python.stderr) {
-        reject(new Error("Failed to create Hugging Face TTS process streams"));
-        return;
+    // Look up voice from voice library
+    let voicePrompt = "Speaks in a clear and expressive voice";
+    
+    if (request.voice) {
+      try {
+        const { VOICE_LIBRARY } = await import("@shared/voices");
+        const voice = VOICE_LIBRARY.find((v) => v.id === request.voice);
+        
+        if (voice) {
+          voicePrompt = voice.prompt;
+        }
+      } catch (error) {
+        console.warn("[HF TTS] Failed to load voice library, using defaults:", error);
       }
-
-      python.stdout.on("data", (data) => {
-        stdoutData += data.toString();
-      });
-
-      python.stderr.on("data", (data) => {
-        stderrData += data.toString();
-      });
-
-      python.on("close", (code) => {
-        if (code !== 0) {
-          reject(new Error(`HF TTS process exited with code ${code}: ${stderrData}`));
-          return;
-        }
-
-        try {
-          const response: TTSResponse = JSON.parse(stdoutData);
-          
-          if (response.status === "error") {
-            reject(new Error(`HF TTS error: ${response.message}`));
-            return;
-          }
-
-          if (!response.audio) {
-            reject(new Error("No audio data in HF TTS response"));
-            return;
-          }
-
-          // Decode base64 audio
-          const audioBuffer = Buffer.from(response.audio, "base64");
-          resolve(audioBuffer);
-        } catch (error) {
-          reject(new Error(`Failed to parse HF TTS response: ${error}`));
-        }
-      });
-
-      python.on("error", (error) => {
-        reject(new Error(`Failed to spawn HF TTS process: ${error.message}`));
-      });
-
-      // Look up voice from voice library
-      let voicePrompt = "Speaks in a clear and expressive voice";
-      let language = "Hindi";
-      
-      if (request.voice) {
-        try {
-          // Import voice library from shared module
-          const { VOICE_LIBRARY } = await import("@shared/voices");
-          const voice = VOICE_LIBRARY.find((v) => v.id === request.voice);
-          
-          if (voice) {
-            voicePrompt = voice.prompt;
-            language = voice.language;
-          }
-        } catch (error) {
-          console.warn("[HF TTS] Failed to load voice library, using defaults:", error);
-        }
-      }
-
-      // Prepare request for Hugging Face service
-      const hfRequest = {
+    }
+    
+    try {
+      const result = await this.hfTtsPool.submitTask({
         text: request.text,
-        voice_prompt: voicePrompt,
-        language: language,
-      };
-
-      python.stdin.write(JSON.stringify(hfRequest) + "\n");
-      python.stdin.end();
-    });
+        model: "indic_parler_tts",
+        voice_prompt: voicePrompt
+      }, 0);
+      
+      if (!result.audio) {
+        throw new Error("No audio data in response");
+      }
+      
+      // Decode base64 audio to buffer
+      const audioBuffer = Buffer.from(result.audio, "base64");
+      return audioBuffer;
+    } catch (error) {
+      console.error("[PythonBridge] HF TTS pool error:", error);
+      throw error;
+    }
   }
   
   private async callParlerTTSMultilingual(request: TTSRequest): Promise<Buffer> {
-    const scriptPath = path.join(__dirname, "ml-services", "parler_tts_multilingual_service.py");
+    if (!this.hfTtsPool) {
+      throw new Error("HF TTS worker pool not initialized");
+    }
     
-    return new Promise(async (resolve, reject) => {
-      const python = spawn(this.pythonPath, [scriptPath]);
-      
-      let stdoutData = "";
-      let stderrData = "";
-
-      if (!python.stdout || !python.stdin || !python.stderr) {
-        reject(new Error("Failed to create Parler-TTS Multilingual process streams"));
-        return;
+    // Look up voice from voice library
+    let voicePrompt = "A clear and natural voice with moderate speed";
+    
+    if (request.voice) {
+      try {
+        const { VOICE_LIBRARY } = await import("@shared/voices");
+        const voice = VOICE_LIBRARY.find((v) => v.id === request.voice);
+        
+        if (voice) {
+          voicePrompt = voice.prompt;
+        }
+      } catch (error) {
+        console.warn("[Parler-TTS Multi] Failed to load voice library, using defaults:", error);
       }
-
-      python.stdout.on("data", (data) => {
-        stdoutData += data.toString();
-      });
-
-      python.stderr.on("data", (data) => {
-        stderrData += data.toString();
-      });
-
-      python.on("close", (code) => {
-        if (code !== 0) {
-          reject(new Error(`Parler-TTS Multi process exited with code ${code}: ${stderrData}`));
-          return;
-        }
-
-        try {
-          const response: any = JSON.parse(stdoutData);
-          
-          if (response.error) {
-            reject(new Error(`Parler-TTS Multi error: ${response.message}`));
-            return;
-          }
-
-          if (!response.audio) {
-            reject(new Error("No audio data in Parler-TTS Multi response"));
-            return;
-          }
-
-          // Decode base64 audio
-          const audioBuffer = Buffer.from(response.audio, "base64");
-          resolve(audioBuffer);
-        } catch (error) {
-          reject(new Error(`Failed to parse Parler-TTS Multi response: ${error}`));
-        }
-      });
-
-      python.on("error", (error) => {
-        reject(new Error(`Failed to spawn Parler-TTS Multi process: ${error.message}`));
-      });
-
-      // Look up voice from voice library
-      let voicePrompt = "A clear and natural voice with moderate speed";
-      
-      if (request.voice) {
-        try {
-          // Import voice library from shared module
-          const { VOICE_LIBRARY } = await import("@shared/voices");
-          const voice = VOICE_LIBRARY.find((v) => v.id === request.voice);
-          
-          if (voice) {
-            voicePrompt = voice.prompt;
-          }
-        } catch (error) {
-          console.warn("[Parler-TTS Multi] Failed to load voice library, using defaults:", error);
-        }
-      }
-
-      // Prepare request for Parler-TTS Multilingual service
-      const parlerRequest = {
-        command: "synthesize",
+    }
+    
+    try {
+      const result = await this.hfTtsPool.submitTask({
         text: request.text,
-        voice_prompt: voicePrompt,
-      };
-
-      python.stdin.write(JSON.stringify(parlerRequest) + "\n");
-      python.stdin.end();
-    });
+        model: "parler_tts_multilingual",
+        voice_prompt: voicePrompt
+      }, 0);
+      
+      if (!result.audio) {
+        throw new Error("No audio data in response");
+      }
+      
+      // Decode base64 audio to buffer
+      const audioBuffer = Buffer.from(result.audio, "base64");
+      return audioBuffer;
+    } catch (error) {
+      console.error("[PythonBridge] Parler-TTS Multi pool error:", error);
+      throw error;
+    }
   }
   
   async callTTSStreaming(
