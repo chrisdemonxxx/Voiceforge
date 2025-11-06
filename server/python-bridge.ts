@@ -576,6 +576,75 @@ export class PythonBridge {
     }
   }
   
+  async analyzeVoice(audioBuffer: Buffer): Promise<any> {
+    const scriptPath = path.join(__dirname, "ml-services", "voice_cloning_service.py");
+    
+    return new Promise((resolve, reject) => {
+      const python = spawn(this.pythonPath, [scriptPath]);
+      
+      let outputBuffer = "";
+      let stderrData = "";
+
+      if (!python.stdout || !python.stdin || !python.stderr) {
+        reject(new Error("Failed to create voice cloning process streams"));
+        return;
+      }
+
+      // Handle stdout
+      python.stdout.on("data", (data) => {
+        outputBuffer += data.toString();
+        
+        // Process complete JSON messages
+        const lines = outputBuffer.split("\n");
+        outputBuffer = lines.pop() || "";
+        
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          
+          try {
+            const message = JSON.parse(line);
+            
+            // Handle ready message
+            if (message.status === "ready") {
+              // Send analyze command
+              const request = {
+                command: "analyze",
+                audio: audioBuffer.toString("base64")
+              };
+              python.stdin.write(JSON.stringify(request) + "\n");
+              python.stdin.end();
+            }
+            // Handle response
+            else if (message.success !== undefined) {
+              if (message.success) {
+                resolve(message.result);
+              } else {
+                reject(new Error(message.error || "Voice analysis failed"));
+              }
+              python.kill();
+            }
+          } catch (error) {
+            console.error("[VoiceCloning] Failed to parse message:", line, error);
+          }
+        }
+      });
+
+      python.stderr.on("data", (data) => {
+        stderrData += data.toString();
+      });
+
+      python.on("close", (code) => {
+        if (code !== 0 && code !== null) {
+          reject(new Error(`Voice cloning process exited with code ${code}: ${stderrData}`));
+        }
+      });
+
+      python.on("error", (error) => {
+        reject(new Error(`Failed to spawn voice cloning process: ${error.message}`));
+      });
+    });
+  }
+
   async getMetrics() {
     const metrics: any = {
       stt: null,
