@@ -166,10 +166,10 @@ export class ZadarmaSIPProvider {
   private handleIncomingInvite(request: any): void {
     console.log(`[ZadarmaSIP] Incoming call from ${request.headers.from.uri}`);
     
-    // Send 180 Ringing
+    // Send 180 Ringing response (not a request!)
     sip.send({
-      method: request.method,
-      uri: request.uri,
+      status: 180,
+      reason: 'Ringing',
       headers: {
         to: request.headers.to,
         from: request.headers.from,
@@ -189,10 +189,10 @@ export class ZadarmaSIPProvider {
   private handleBye(request: any): void {
     const callId = request.headers['call-id'];
     
-    // Send 200 OK
+    // Send 200 OK response (not a request!)
     sip.send({
-      method: request.method,
-      uri: request.uri,
+      status: 200,
+      reason: 'OK',
       headers: {
         to: request.headers.to,
         from: request.headers.from,
@@ -214,10 +214,10 @@ export class ZadarmaSIPProvider {
   private handleCancel(request: any): void {
     const callId = request.headers['call-id'];
     
-    // Send 200 OK
+    // Send 200 OK response (not a request!)
     sip.send({
-      method: request.method,
-      uri: request.uri,
+      status: 200,
+      reason: 'OK',
       headers: {
         to: request.headers.to,
         from: request.headers.from,
