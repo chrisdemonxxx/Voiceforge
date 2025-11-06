@@ -18,6 +18,26 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
+  
+  // Initialize Python worker pools
+  console.log("[Server] Initializing Python worker pools...");
+  try {
+    await pythonBridge.initialize();
+    console.log("[Server] Python worker pools initialized successfully");
+  } catch (error) {
+    console.error("[Server] Failed to initialize Python worker pools:", error);
+    console.log("[Server] Continuing without worker pools (will use fallback spawn mode)");
+  }
+  
+  // Setup graceful shutdown
+  const shutdown = async () => {
+    console.log("\n[Server] Shutting down...");
+    await pythonBridge.shutdown();
+    process.exit(0);
+  };
+  
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 
   // API Key Authentication Middleware with Rate Limiting
   const authenticateApiKey = async (req: any, res: any, next: any) => {
