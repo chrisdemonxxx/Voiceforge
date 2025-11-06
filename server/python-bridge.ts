@@ -13,6 +13,7 @@ interface TTSRequest {
   model: string;
   voice?: string;
   speed?: number;
+  voice_characteristics?: any;
 }
 
 interface TTSResponse {

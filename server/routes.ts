@@ -116,12 +116,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const startTime = Date.now();
       const data = ttsRequestSchema.parse(req.body);
       
+      // Check if voice is a cloned voice ID
+      let voiceCharacteristics = null;
+      if (data.voice) {
+        const clonedVoice = await storage.getClonedVoice(data.voice);
+        if (clonedVoice) {
+          voiceCharacteristics = clonedVoice.voiceCharacteristics;
+        }
+      }
+      
       // Call Python TTS service with formant synthesis
       const audioBuffer = await pythonBridge.callTTS({
         text: data.text,
         model: data.model,
         voice: data.voice,
         speed: data.speed,
+        voice_characteristics: voiceCharacteristics,
       });
       
       const processingTime = Date.now() - startTime;
