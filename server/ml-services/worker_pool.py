@@ -97,9 +97,9 @@ class Worker:
                 service = STTService()
                 print(f"[Worker {self.worker_id}] STT service initialized", file=sys.stderr, flush=True)
             elif self.worker_type == WorkerType.TTS:
-                from tts_service import TTSService
-                service = TTSService()
-                print(f"[Worker {self.worker_id}] TTS service initialized", file=sys.stderr, flush=True)
+                from tts_streaming import StreamingTTSService
+                service = StreamingTTSService()
+                print(f"[Worker {self.worker_id}] TTS streaming service initialized", file=sys.stderr, flush=True)
             elif self.worker_type == WorkerType.VLLM:
                 # VLLM service not yet implemented
                 print(f"[Worker {self.worker_id}] VLLM service not implemented", file=sys.stderr, flush=True)
