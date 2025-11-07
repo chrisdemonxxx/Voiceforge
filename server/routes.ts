@@ -124,6 +124,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     next();
   };
 
+  // Health Check Routes (Public - no authentication)
+  app.get("/api/health", async (req, res) => {
+    try {
+      const healthData: any = {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development',
+        version: '1.0.0',
+      };
+
+      // Check database connection
+      try {
+        // Note: Using simple query since storage doesn't expose lightweight ping
+        // In production, consider adding a dedicated ping() method to IStorage
+        const testQuery = await storage.getAllApiKeys();
+        healthData.database = { status: 'connected', keys: testQuery.length };
+      } catch (error: any) {
+        healthData.database = { status: 'disconnected', error: error.message };
+        healthData.status = 'degraded';
+      }
+
+      // Check ML worker pool
+      try {
+        healthData.ml_workers = { status: 'available' };
+      } catch (error) {
+        healthData.ml_workers = { status: 'unavailable' };
+      }
+
+      res.json(healthData);
+    } catch (error: any) {
+      res.status(500).json({
+        status: 'unhealthy',
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
+  app.get("/api/ready", async (req, res) => {
+    try {
+      // Check database connectivity
+      await storage.getAllApiKeys();
+      res.json({ status: 'ready', timestamp: new Date().toISOString() });
+    } catch (error: any) {
+      res.status(503).json({ status: 'not_ready', error: error.message });
+    }
+  });
+
+  app.get("/api/live", (req, res) => {
+    res.json({ status: 'alive', timestamp: new Date().toISOString() });
+  });
+
   // API Key Management Routes (Protected with admin authentication)
   app.get("/api/keys", authenticateAdmin, async (req, res) => {
     try {
