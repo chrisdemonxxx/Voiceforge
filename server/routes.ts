@@ -961,6 +961,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/telephony/calls", authenticateApiKey, async (req, res) => {
+    try {
+      const apiKey = (req as any).apiKey;
+      const { providerId, from, to, flowId } = req.body;
+
+      if (!providerId || !from || !to) {
+        return res.status(400).json({ error: "Missing required fields: providerId, from, to" });
+      }
+
+      // Verify provider ownership
+      const provider = await storage.getTelephonyProvider(providerId);
+      if (!provider || provider.apiKeyId !== apiKey.id) {
+        return res.status(403).json({ error: "Provider not found or access denied" });
+      }
+
+      // Initiate call through telephony service (uses instance created below)
+      const callSession = await telephonyService.initiateCall({
+        providerId,
+        from,
+        to,
+        flowId,
+      });
+
+      res.json(callSession);
+    } catch (error: any) {
+      console.error('[API] Call initiation error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Calling Campaigns
   app.get("/api/telephony/campaigns", authenticateApiKey, async (req, res) => {
     try {
