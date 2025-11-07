@@ -42,12 +42,15 @@ function generateZadarmaSignature(
   // Build signature string: method + params + md5(params)
   const signString = method + paramsString + paramsMd5;
   
-  // Generate HMAC-SHA1 signature (raw binary, then base64 encode)
-  // This matches PHP: base64_encode(hash_hmac('sha1', ..., true))
-  const signature = crypto
+  // Generate HMAC-SHA1 signature (hex string, then base64 encode)
+  // This matches PHP: base64_encode(hash_hmac('sha1', ...))
+  // PHP hash_hmac() returns hex by default, then base64_encode wraps it
+  const hmacHex = crypto
     .createHmac('sha1', apiSecret)
     .update(signString)
-    .digest('base64');
+    .digest('hex');
+  
+  const signature = Buffer.from(hmacHex).toString('base64');
   
   return signature;
 }

@@ -22,11 +22,13 @@ function generateSignature(
   const paramsMd5 = crypto.createHash('md5').update(paramsString).digest('hex');
   const signString = method + paramsString + paramsMd5;
   
-  // HMAC-SHA1 as raw binary, then base64 encode (matches PHP with true parameter)
-  const signature = crypto
+  // HMAC-SHA1 as hex, then base64 encode (matches PHP: base64_encode(hash_hmac()))
+  const hmacHex = crypto
     .createHmac('sha1', apiSecret)
     .update(signString)
-    .digest('base64');
+    .digest('hex');
+  
+  const signature = Buffer.from(hmacHex).toString('base64');
   
   console.log('\n🔍 Signature Generation Debug:');
   console.log('  Method:', method);
@@ -34,6 +36,7 @@ function generateSignature(
   console.log('  Params String:', paramsString);
   console.log('  Params MD5:', paramsMd5);
   console.log('  Sign String:', signString);
+  console.log('  HMAC (hex):', hmacHex);
   console.log('  Signature (base64):', signature);
   
   return signature;
@@ -55,16 +58,16 @@ async function testSimpleEndpoint() {
   console.log('✓ API Key:', apiKey.substring(0, 10) + '...');
   console.log('✓ API Secret:', '*'.repeat(apiSecret.length) + '\n');
 
-  // Test 1: Balance endpoint (simplest)
-  console.log('📋 TEST 1: /v1/info/balance/');
+  // Test 1: Balance endpoint (NO params - matches Zadarma's exact example)
+  console.log('📋 TEST 1: /v1/info/balance/ (no parameters)');
   console.log('═'.repeat(65));
   
   const balanceMethod = '/v1/info/balance/';
-  const balanceParams = { format: 'json' };
+  const balanceParams = {};  // Empty params, matching Zadarma's PHP example
   const balanceSignature = generateSignature(balanceMethod, balanceParams, apiSecret);
   
   try {
-    const balanceUrl = `https://api.zadarma.com${balanceMethod}?format=json`;
+    const balanceUrl = `https://api.zadarma.com${balanceMethod}`;
     console.log('\n  Request URL:', balanceUrl);
     console.log('  Authorization:', `${apiKey}:${balanceSignature.substring(0, 20)}...`);
     
