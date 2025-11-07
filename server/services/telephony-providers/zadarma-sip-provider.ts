@@ -50,6 +50,7 @@ export class ZadarmaSIPProvider {
   private isRegistered: boolean = false;
   private registrationExpires: number = 3600; // Default 1 hour
   private registrationTimer: NodeJS.Timeout | null = null;
+  private retryTimer: NodeJS.Timeout | null = null;
 
   constructor(provider: TelephonyProviderType) {
     const creds = provider.credentials as ZadarmaSIPCredentials;
@@ -210,9 +211,14 @@ export class ZadarmaSIPProvider {
    * Schedule automatic re-registration before expiry
    */
   private scheduleReRegistration(expires: number): void {
-    // Clear existing timer
+    // Clear existing timers
     if (this.registrationTimer) {
       clearTimeout(this.registrationTimer);
+      this.registrationTimer = null;
+    }
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
     }
 
     // Re-register at 80% of expiry time (e.g., 48 minutes for 1 hour)
@@ -224,8 +230,16 @@ export class ZadarmaSIPProvider {
       console.log(`[ZadarmaSIP-REGISTER] Refreshing registration...`);
       this.register().catch((error) => {
         console.error(`[ZadarmaSIP-REGISTER] Re-registration failed:`, error.message);
-        // Retry after 30 seconds if failed
-        setTimeout(() => this.register(), 30000);
+        this.isRegistered = false;
+        
+        // Retry after 30 seconds if failed - track this timer for cleanup
+        this.retryTimer = setTimeout(() => {
+          this.retryTimer = null;
+          this.register().catch((retryError) => {
+            console.error(`[ZadarmaSIP-REGISTER] Retry also failed:`, retryError.message);
+            this.isRegistered = false;
+          });
+        }, 30000);
       });
     }, refreshTime);
   }
@@ -388,6 +402,11 @@ export class ZadarmaSIPProvider {
    * Initiate an outbound call via SIP INVITE
    */
   async initiateCall(options: CallOptions): Promise<CallResult> {
+    // Enforce registration gate - calls must wait until REGISTER succeeds
+    if (!this.isRegistered) {
+      throw new Error('Cannot initiate call: SIP registration not complete. Wait for registration to succeed.');
+    }
+
     return new Promise((resolve, reject) => {
       const callId = this.generateCallId();
       const fromTag = this.generateTag();
@@ -679,10 +698,14 @@ export class ZadarmaSIPProvider {
   destroy(): void {
     console.log(`[ZadarmaSIP] Shutting down SIP stack`);
     
-    // Clear registration timer
+    // Clear all registration-related timers
     if (this.registrationTimer) {
       clearTimeout(this.registrationTimer);
       this.registrationTimer = null;
+    }
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
     }
     
     // End all active calls
