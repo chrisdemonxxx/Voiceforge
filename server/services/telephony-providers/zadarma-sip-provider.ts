@@ -119,7 +119,7 @@ export class ZadarmaSIPProvider {
   }
 
   /**
-   * Format SIP message for logging (truncate for readability)
+   * Format SIP message for logging (detailed for debugging)
    */
   private formatSIPMessage(msg: any): string {
     if (!msg) return '';
@@ -127,6 +127,24 @@ export class ZadarmaSIPProvider {
     const method = msg.method || msg.status;
     const uri = msg.uri || '';
     const callId = msg.headers?.['call-id'] || 'unknown';
+    const from = msg.headers?.from?.uri || 'unknown';
+    const to = msg.headers?.to?.uri || 'unknown';
+    
+    // Show full details for debugging
+    console.log(`[ZadarmaSIP-DETAIL] ${method} ${uri}`);
+    console.log(`[ZadarmaSIP-DETAIL] From: ${from}, To: ${to}`);
+    console.log(`[ZadarmaSIP-DETAIL] Call-ID: ${callId}`);
+    
+    if (msg.status) {
+      console.log(`[ZadarmaSIP-DETAIL] Status: ${msg.status} ${msg.reason || ''}`);
+      if (msg.headers?.['www-authenticate']) {
+        console.log(`[ZadarmaSIP-DETAIL] Auth Challenge: ${msg.headers['www-authenticate']}`);
+      }
+    }
+    
+    if (msg.content) {
+      console.log(`[ZadarmaSIP-DETAIL] Content (${msg.content.length} bytes):\n${msg.content.substring(0, 200)}...`);
+    }
     
     return `${method} ${uri} (Call-ID: ${callId.substring(0, 20)}...)`;
   }
@@ -359,21 +377,30 @@ export class ZadarmaSIPProvider {
    * Send authenticated SIP request with digest authentication
    */
   private sendAuthenticatedRequest(request: any, callback: (response: any) => void): void {
+    console.log(`[ZadarmaSIP-AUTH] Sending initial request (no auth)`);
+    
     // First attempt without auth
     sip.send(request, (response: any) => {
+      console.log(`[ZadarmaSIP-AUTH] Received response: ${response.status} ${response.reason || ''}`);
+      
       if (response.status === 401 || response.status === 407) {
         // Authentication required
-        console.log(`[ZadarmaSIP] Authentication required, adding credentials`);
+        console.log(`[ZadarmaSIP-AUTH] Authentication required (${response.status})`);
         
         const challenge = response.headers['www-authenticate'] || response.headers['proxy-authenticate'];
+        console.log(`[ZadarmaSIP-AUTH] Challenge: ${challenge}`);
+        
         const authHeader = this.generateAuthHeader(request, challenge);
+        console.log(`[ZadarmaSIP-AUTH] Generated auth header: ${authHeader.substring(0, 80)}...`);
         
         // Retry with authentication
         request.headers.authorization = authHeader;
         request.headers.cseq.seq++;
         
+        console.log(`[ZadarmaSIP-AUTH] Retrying with authentication (CSeq: ${request.headers.cseq.seq})`);
         sip.send(request, callback);
       } else {
+        console.log(`[ZadarmaSIP-AUTH] No auth required, forwarding response`);
         callback(response);
       }
     });
