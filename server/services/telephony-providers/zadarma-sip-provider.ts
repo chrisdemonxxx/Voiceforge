@@ -5,8 +5,9 @@
  * https://zadarma.com/en/support/instructions/
  */
 
-import * as sip from 'sip';
+import sip from 'sip';
 import crypto from 'crypto';
+import os from 'os';
 import type { TelephonyProvider as TelephonyProviderType } from '@shared/schema';
 
 interface ZadarmaSIPCredentials {
@@ -68,11 +69,13 @@ export class ZadarmaSIPProvider {
    * Get local IP address for SIP Contact header
    */
   private getLocalIp(): string {
-    const os = require('os');
     const interfaces = os.networkInterfaces();
     
     for (const name of Object.keys(interfaces)) {
-      for (const iface of interfaces[name]) {
+      const ifaceList = interfaces[name];
+      if (!ifaceList) continue;
+      
+      for (const iface of ifaceList) {
         if (iface.family === 'IPv4' && !iface.internal) {
           return iface.address;
         }
@@ -113,7 +116,6 @@ export class ZadarmaSIPProvider {
     });
 
     console.log(`[ZadarmaSIP] Stack initialized on ${this.localIp}:${this.localPort}`);
-    this.sipStack = sip;
   }
 
   /**
@@ -545,7 +547,7 @@ export class ZadarmaSIPProvider {
     }
 
     // Stop SIP stack
-    if (sip.stop) {
+    if (sip && sip.stop) {
       sip.stop();
     }
   }
