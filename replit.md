@@ -10,11 +10,12 @@ Implemented complete SIP REGISTER support enabling proper Zadarma SIP authentica
 
 **SIP REGISTER Implementation**:
 *   **Automatic Registration**: Provider automatically registers with SIP server on initialization, required before making calls
+*   **Registration Gate**: `initiateCall` enforces registration check - calls are rejected with clear error if registration incomplete
 *   **Digest Authentication**: Full MD5-based digest authentication with realm/nonce challenge-response mechanism
 *   **Periodic Re-Registration**: Automatic refresh at 80% of expiry time (e.g., 48 minutes for 1-hour registration) to prevent service interruption
-*   **Retry Logic**: Failed re-registrations automatically retry after 30 seconds for resilience
-*   **Graceful Cleanup**: Registration timer properly cleared on provider destroy to prevent memory leaks
-*   **Registration State Tracking**: `isRegistered` boolean state prevents calls before registration completes
+*   **Retry Logic**: Failed re-registrations automatically retry after 30 seconds with proper error handling
+*   **Graceful Cleanup**: Both registration and retry timers properly cleared on provider destroy to prevent memory leaks
+*   **Registration State Tracking**: `isRegistered` boolean state flips to false on registration failure
 
 **Technical Details**:
 *   Registration expires after 3600 seconds (1 hour) by default, parsed from server Contact header or Expires header
