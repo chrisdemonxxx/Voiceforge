@@ -47,6 +47,9 @@ export class ZadarmaSIPProvider {
   private localPort: number;
   private activeDialogs: Map<string, SIPDialog>;
   private sipStack: any;
+  private isRegistered: boolean = false;
+  private registrationExpires: number = 3600; // Default 1 hour
+  private registrationTimer: NodeJS.Timeout | null = null;
 
   constructor(provider: TelephonyProviderType) {
     const creds = provider.credentials as ZadarmaSIPCredentials;
@@ -63,6 +66,11 @@ export class ZadarmaSIPProvider {
     this.activeDialogs = new Map();
 
     this.initializeSIPStack();
+    
+    // Automatically register with SIP server on initialization
+    this.register().catch((error) => {
+      console.error(`[ZadarmaSIP] Registration failed:`, error.message);
+    });
   }
 
   /**
@@ -116,6 +124,110 @@ export class ZadarmaSIPProvider {
     });
 
     console.log(`[ZadarmaSIP] Stack initialized on ${this.localIp}:${this.localPort}`);
+  }
+
+  /**
+   * Register with SIP server (REGISTER method)
+   * Required by many SIP providers before making calls
+   */
+  async register(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const callId = this.generateCallId();
+      const tag = this.generateTag();
+      const sipUri = `sip:${this.sipUsername}@${this.sipDomain}`;
+      
+      console.log(`[ZadarmaSIP] Registering ${this.sipUsername} with ${this.sipDomain}`);
+
+      const registerMessage = {
+        method: 'REGISTER',
+        uri: `sip:${this.sipDomain}`,
+        headers: {
+          to: {
+            uri: sipUri
+          },
+          from: {
+            uri: sipUri,
+            params: { tag }
+          },
+          'call-id': callId,
+          cseq: { method: 'REGISTER', seq: 1 },
+          contact: [{
+            uri: `sip:${this.sipUsername}@${this.localIp}:${this.localPort}`,
+            params: { expires: this.registrationExpires }
+          }],
+          expires: this.registrationExpires,
+          'max-forwards': 70,
+          'user-agent': 'VoiceForge/1.0'
+        }
+      };
+
+      let responseReceived = false;
+
+      const responseHandler = (response: any) => {
+        if (!response || response.headers['call-id'] !== callId) return;
+
+        const status = response.status;
+        console.log(`[ZadarmaSIP-REGISTER] Received ${status} response`);
+
+        responseReceived = true;
+
+        if (status === 200) {
+          // Registration successful
+          this.isRegistered = true;
+          
+          // Parse expiration from response
+          const expires = response.headers?.contact?.[0]?.params?.expires || 
+                         response.headers?.expires || 
+                         this.registrationExpires;
+          
+          console.log(`[ZadarmaSIP-REGISTER] Registration successful (expires in ${expires}s)`);
+          
+          // Schedule re-registration before expiry (refresh at 80% of expiry time)
+          this.scheduleReRegistration(expires);
+          
+          resolve();
+        } else if (status >= 300) {
+          // Registration failed
+          console.error(`[ZadarmaSIP-REGISTER] Registration failed: ${status} ${response.reason}`);
+          this.isRegistered = false;
+          reject(new Error(`Registration failed: ${status} ${response.reason}`));
+        }
+      };
+
+      // Send REGISTER with authentication
+      this.sendAuthenticatedRequest(registerMessage, responseHandler);
+
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        if (!responseReceived) {
+          reject(new Error('Registration timeout: No response within 10 seconds'));
+        }
+      }, 10000);
+    });
+  }
+
+  /**
+   * Schedule automatic re-registration before expiry
+   */
+  private scheduleReRegistration(expires: number): void {
+    // Clear existing timer
+    if (this.registrationTimer) {
+      clearTimeout(this.registrationTimer);
+    }
+
+    // Re-register at 80% of expiry time (e.g., 48 minutes for 1 hour)
+    const refreshTime = expires * 0.8 * 1000; // Convert to ms
+    
+    console.log(`[ZadarmaSIP-REGISTER] Scheduling re-registration in ${Math.floor(refreshTime / 1000)}s`);
+    
+    this.registrationTimer = setTimeout(() => {
+      console.log(`[ZadarmaSIP-REGISTER] Refreshing registration...`);
+      this.register().catch((error) => {
+        console.error(`[ZadarmaSIP-REGISTER] Re-registration failed:`, error.message);
+        // Retry after 30 seconds if failed
+        setTimeout(() => this.register(), 30000);
+      });
+    }, refreshTime);
   }
 
   /**
@@ -567,6 +679,12 @@ export class ZadarmaSIPProvider {
   destroy(): void {
     console.log(`[ZadarmaSIP] Shutting down SIP stack`);
     
+    // Clear registration timer
+    if (this.registrationTimer) {
+      clearTimeout(this.registrationTimer);
+      this.registrationTimer = null;
+    }
+    
     // End all active calls
     const callIds = Array.from(this.activeDialogs.keys());
     for (const callId of callIds) {
@@ -577,5 +695,7 @@ export class ZadarmaSIPProvider {
     if (sip && sip.stop) {
       sip.stop();
     }
+    
+    this.isRegistered = false;
   }
 }
