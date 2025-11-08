@@ -17,11 +17,8 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build TypeScript backend
+# Build frontend and backend (Vite + TypeScript)
 RUN npm run build
-
-# Build frontend (Vite)
-RUN npm run build:client
 
 # ============================================================================
 # Stage 2: Python ML Dependencies
