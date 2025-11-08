@@ -1,0 +1,13 @@
+Reading package lists...
+Building dependency tree...
+Reading state information...
+E: Unable to locate package libavformat59
+E: Unable to locate package libavcodec59
+E: Unable to locate package libavutil57
+E: Unable to locate package libswscale6
+E: Unable to locate package libswresample4
+--> RUN apt-get update && apt-get install -y     python3.11     python3-pip     python3.11-dev     git     wget     curl     ffmpeg     libsndfile1     pkg-config     libavformat-dev     libavcodec-dev     libavdevice-dev     libavutil-dev     libswscale-dev     libswresample-dev     libavfilter-dev     build-essential     && rm -rf /var/lib/apt/lists/*
+Selecting previously unselected package libgdbm6:amd64.
+--> RUN apt-get update && apt-get install -y     ca-certificates     curl     gnupg     && mkdir -p /etc/apt/keyrings     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list     && apt-get update     && apt-get install -y     nodejs     python3.11     python3-pip     ffmpeg     libsndfile1     libavformat59     libavcodec59     libavutil57     libswscale6     libswresample4     && rm -rf /var/lib/apt/lists/*
+
+--> ERROR: process "/bin/sh -c apt-get update && apt-get install -y     ca-certificates     curl     gnupg     && mkdir -p /etc/apt/keyrings     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg     && echo \"deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main\" | tee /etc/apt/sources.list.d/nodesource.list     && apt-get update     && apt-get install -y     nodejs     python3.11     python3-pip     ffmpeg     libsndfile1     libavformat59     libavcodec59     libavutil57     libswscale6     libswresample4     && rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
