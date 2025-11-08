@@ -1,0 +1,88 @@
+equirement already satisfied: torch==2.1.2+cu121 in /usr/local/lib/python3.10/dist-packages (from -r requirements-deployment.txt (line 10)) (2.1.2+cu121)
+Requirement already satisfied: torchaudio==2.1.2+cu121 in /usr/local/lib/python3.10/dist-packages (from -r requirements-deployment.txt (line 11)) (2.1.2+cu121)
+Collecting transformers==4.36.2
+  Downloading transformers-4.36.2-py3-none-any.whl (8.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.2/8.2 MB 108.7 MB/s eta 0:00:00
+Collecting accelerate==0.25.0
+  Downloading accelerate-0.25.0-py3-none-any.whl (265 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 265.7/265.7 KB 492.2 MB/s eta 0:00:00
+Collecting optimum==1.16.0
+  Downloading optimum-1.16.0-py3-none-any.whl (403 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 403.4/403.4 KB 439.1 MB/s eta 0:00:00
+ERROR: Could not find a version that satisfies the requirement parler-tts==0.1.0 (from versions: 0.2.2, 0.2.3)
+ERROR: No matching distribution found for parler-tts==0.1.0
+
+--> ERROR: process "/bin/sh -c pip install --no-cache-dir -r requirements-deployment.txt" did not complete successfully: exit code: 1
+
+ 
+VoiceForgeAI
+/ Dockerfile
+Chrisdemonxxx's picture
+Chrisdemonxxx
+Update Dockerfile
+3ad4bba
+verified
+less than a minute ago
+raw
+history
+blame
+edit
+delete
+3.88 kB
+# VoiceForge API - Production Dockerfile for 80GB A100 GPU Deployment
+# Multi-stage build for optimal image size and performance
+
+# ============================================================================
+# Stage 1: Node.js Build (Frontend + Backend TypeScript)
+# ============================================================================
+FROM node:20-slim AS node-builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies (production + dev for build)
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build frontend and backend (Vite + TypeScript)
+RUN npm run build
+
+# ============================================================================
+# Stage 2: Python ML Dependencies
+# ============================================================================
+FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 AS python-base
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3-pip \
+    python3.11-dev \
+    git \
+    wget \
+    curl \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
+
+WORKDIR /app
+
+# Copy Python deployment requirements
+COPY requirements-deployment.txt .
+
+# Install Python ML dependencies (with GPU support)
+# Install PyTorch with CUDA first, then other dependencies
+RUN pip install --no-cache-dir torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
+RUN pip install --no-cache-dir -r requirements-deployment.txt
+
+# Verify PyTorch installation (CUDA check happens at runtime, not build time)
+RUN python -c "import torch; print(f'✓ PyTorch {torch.__version__} installed (CUDA support will be verified at runtime)')"
+
+# ============================================================================
