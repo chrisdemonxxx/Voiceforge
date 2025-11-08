@@ -10,9 +10,10 @@
 torch==2.1.2+cu121
 torchaudio==2.1.2+cu121
 --index-url https://pypi.org/simple
-transformers==4.36.2
-accelerate==0.25.0
-optimum==1.16.0
+# NOTE: transformers/accelerate/optimum versions coupled - parler-tts requires transformers==4.46.1
+transformers==4.46.1
+accelerate==0.27.2
+optimum==1.18.0
 
 # ============================================================================
 # Text-to-Speech (TTS) Models
@@ -35,9 +36,10 @@ webrtcvad==2.0.10
 # ============================================================================
 # Voice Large Language Model (VLLM)
 # ============================================================================
-vllm==0.2.7
-sentencepiece==0.1.99
-protobuf==4.25.1
+# NOTE: vllm/sentencepiece/protobuf versions coupled - using 0.6.x (last supporting torch 2.1)
+vllm==0.6.4
+sentencepiece==0.2.0
+protobuf==4.25.3
 
 # ============================================================================
 # Voice Cloning
@@ -60,9 +62,10 @@ scipy==1.11.4
 # ============================================================================
 # Model Management & Optimization
 # ============================================================================
-huggingface-hub==0.20.2
+# NOTE: bitsandbytes version must match torch CUDA wheel (cu121)
+huggingface-hub==0.22.2
 safetensors==0.4.1
-bitsandbytes==0.41.3
+bitsandbytes==0.42.0
 
 # ============================================================================
 # API & Web Framework
