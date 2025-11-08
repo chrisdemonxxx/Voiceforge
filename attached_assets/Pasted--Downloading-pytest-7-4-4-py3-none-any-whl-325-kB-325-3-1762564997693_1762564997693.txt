@@ -1,0 +1,37 @@
+ Downloading pytest-7.4.4-py3-none-any.whl (325 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 325.3/325.3 KB 561.5 MB/s eta 0:00:00
+Collecting pytest-asyncio==0.23.3
+  Downloading pytest_asyncio-0.23.3-py3-none-any.whl (17 kB)
+Requirement already satisfied: filelock in /usr/local/lib/python3.10/dist-packages (from torch==2.1.2+cu121->-r requirements-deployment.txt (line 10)) (3.19.1)
+Requirement already satisfied: typing-extensions in /usr/local/lib/python3.10/dist-packages (from torch==2.1.2+cu121->-r requirements-deployment.txt (line 10)) (4.15.0)
+Requirement already satisfied: networkx in /usr/local/lib/python3.10/dist-packages (from torch==2.1.2+cu121->-r requirements-deployment.txt (line 10)) (3.3)
+Requirement already satisfied: jinja2 in /usr/local/lib/python3.10/dist-packages (from torch==2.1.2+cu121->-r requirements-deployment.txt (line 10)) (3.1.6)
+Requirement already satisfied: fsspec in /usr/local/lib/python3.10/dist-packages (from torch==2.1.2+cu121->-r requirements-deployment.txt (line 10)) (2025.9.0)
+Requirement already satisfied: sympy in /usr/local/lib/python3.10/dist-packages (from torch==2.1.2+cu121->-r requirements-deployment.txt (line 10)) (1.14.0)
+Requirement already satisfied: triton==2.1.0 in /usr/local/lib/python3.10/dist-packages (from torch==2.1.2+cu121->-r requirements-deployment.txt (line 10)) (2.1.0)
+Collecting regex!=2019.12.17
+  Downloading regex-2025.11.3-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (791 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 791.7/791.7 KB 384.2 MB/s eta 0:00:00
+Collecting packaging>=20.0
+  Downloading packaging-25.0-py3-none-any.whl (66 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 66.5/66.5 KB 404.9 MB/s eta 0:00:00
+Collecting tokenizers<0.21,>=0.20
+  Downloading tokenizers-0.20.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.0 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.0/3.0 MB 215.8 MB/s eta 0:00:00
+INFO: pip is looking at multiple versions of torchaudio to determine which version is compatible with other requirements. This could take a while.
+INFO: pip is looking at multiple versions of torch to determine which version is compatible with other requirements. This could take a while.
+ERROR: Cannot install -r requirements-deployment.txt (line 14) and huggingface-hub==0.22.2 because these package versions have conflicting dependencies.
+
+The conflict is caused by:
+    The user requested huggingface-hub==0.22.2
+    transformers 4.46.1 depends on huggingface-hub<1.0 and >=0.23.2
+
+To fix this you could try to:
+1. loosen the range of package versions you've specified
+2. remove package versions to allow pip attempt to solve the dependency conflict
+
+ERROR: ResolutionImpossible: for help visit https://pip.pypa.io/en/latest/topics/dependency-resolution/#dealing-with-dependency-conflicts
+
+--> ERROR: process "/bin/sh -c pip install --no-cache-dir -r requirements-deployment.txt" did not complete successfully: exit code: 1
+
+ 
