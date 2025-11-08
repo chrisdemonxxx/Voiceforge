@@ -1,0 +1,74 @@
+===== Build Queued at 2025-11-08 00:57:08 / Commit SHA: edeaa44 =====
+
+--> WORKDIR /app
+CACHED
+
+--> COPY server ./server
+CACHED
+
+--> COPY --from=node-builder /app/client/dist ./client/dist
+CACHED
+
+--> COPY package*.json ./
+CACHED
+
+--> WORKDIR /app
+CACHED
+
+--> RUN python -c "import torch; print(f'✓ PyTorch {torch.__version__} installed (CUDA support will be verified at runtime)')"
+CACHED
+
+--> RUN npm run build
+CACHED
+
+--> RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+CACHED
+
+--> COPY --from=node-builder /app/package*.json ./
+CACHED
+
+--> RUN pip install --no-cache-dir -r requirements-deployment.txt
+CACHED
+
+--> COPY --from=python-base /usr/local/lib/python3.11 /usr/local/lib/python3.11
+CACHED
+
+--> RUN npm run build:client
+CACHED
+
+--> COPY --from=node-builder /app/node_modules ./node_modules
+CACHED
+
+--> COPY shared ./shared
+CACHED
+
+--> COPY client/index.html ./client/
+CACHED
+
+--> RUN pip install --no-cache-dir torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
+CACHED
+
+--> COPY requirements-deployment.txt .
+CACHED
+
+--> RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
+CACHED
+
+--> RUN npm ci
+CACHED
+
+--> COPY --from=node-builder /app/dist ./dist
+CACHED
+
+--> COPY . .
+CACHED
+
+--> RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+CACHED
+
+--> RUN apt-get update && apt-get install -y     ca-certificates     curl     gnupg     && mkdir -p /etc/apt/keyrings     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list     && apt-get update     && apt-get install -y     nodejs     python3.11     python3-pip     ffmpeg     libsndfile1     && rm -rf /var/lib/apt/lists/*
+CACHED
+
+--> COPY replit.md ./
+
+--> ERROR: failed to calculate checksum of ref dfk7qyx6ghggrly9sv0mlpy23::tfs80ug1wokujlx2uo3ttjscz: "/replit.md": not found

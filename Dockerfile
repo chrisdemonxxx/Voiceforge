@@ -101,7 +101,6 @@ COPY --from=python-base /usr/local/lib/python3.11 /usr/local/lib/python3.11
 COPY server ./server
 COPY shared ./shared
 COPY client/index.html ./client/
-COPY replit.md ./
 COPY requirements-deployment.txt ./
 
 # Create directories for runtime data
