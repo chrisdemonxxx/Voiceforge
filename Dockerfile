@@ -35,6 +35,15 @@ RUN apt-get update && apt-get install -y \
     curl \
     ffmpeg \
     libsndfile1 \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libavfilter-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.11 as default
@@ -74,6 +83,11 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     ffmpeg \
     libsndfile1 \
+    libavformat59 \
+    libavcodec59 \
+    libavutil57 \
+    libswscale6 \
+    libswresample4 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.11 as default
