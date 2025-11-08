@@ -1,3 +1,15 @@
+---
+title: VoiceForge API
+emoji: 🎙️
+colorFrom: purple
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+short_description: GPU-Accelerated Voice AI Platform - TTS, STT, VAD, VLLM
+---
+
 # 🎙️ VoiceForge API
 
 **Production-Ready Voice AI Platform with 80GB A100 GPU Deployment**
