@@ -83,11 +83,6 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     ffmpeg \
     libsndfile1 \
-    libavformat59 \
-    libavcodec59 \
-    libavutil57 \
-    libswscale6 \
-    libswresample4 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.11 as default
