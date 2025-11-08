@@ -85,11 +85,8 @@ WORKDIR /app
 COPY --from=node-builder /app/node_modules ./node_modules
 COPY --from=node-builder /app/package*.json ./
 
-# Copy built backend
+# Copy built frontend and backend (dist contains both)
 COPY --from=node-builder /app/dist ./dist
-
-# Copy built frontend
-COPY --from=node-builder /app/client/dist ./client/dist
 
 # Copy Python dependencies
 COPY --from=python-base /usr/local/lib/python3.11 /usr/local/lib/python3.11
@@ -97,7 +94,6 @@ COPY --from=python-base /usr/local/lib/python3.11 /usr/local/lib/python3.11
 # Copy source files needed at runtime
 COPY server ./server
 COPY shared ./shared
-COPY client/index.html ./client/
 COPY requirements-deployment.txt ./
 
 # Create directories for runtime data
