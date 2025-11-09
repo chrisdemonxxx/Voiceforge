@@ -128,9 +128,9 @@ ENV TORCH_HOME=/app/ml-cache
 # Expose port 7860 (Hugging Face Spaces standard)
 EXPOSE 7860
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:7860/api/health || exit 1
+# Health check (disabled for initial debugging - HF may be killing container on failed health check)
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+#     CMD curl -f http://localhost:7860/api/health || exit 1
 
 # Start the application (via app.py which handles database initialization)
 CMD ["python", "app.py"]
