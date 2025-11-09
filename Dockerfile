@@ -103,7 +103,11 @@ COPY --from=python-base /usr/local/lib/python3.11 /usr/local/lib/python3.11
 # Copy source files needed at runtime
 COPY server ./server
 COPY shared ./shared
+COPY db ./db
 COPY requirements-deployment.txt ./
+COPY app.py ./
+COPY drizzle.config.ts ./
+COPY tsconfig.json ./
 
 # Create directories for runtime data
 RUN mkdir -p /app/uploads /app/ml-cache /app/logs
@@ -123,5 +127,5 @@ EXPOSE 7860
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:7860/api/health || exit 1
 
-# Start the application
-CMD ["npm", "start"]
+# Start the application (via app.py which handles database initialization)
+CMD ["python", "app.py"]

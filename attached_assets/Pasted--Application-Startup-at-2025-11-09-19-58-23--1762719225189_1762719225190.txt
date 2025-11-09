@@ -1,0 +1,88 @@
+
+===== Application Startup at 2025-11-09 19:58:23 =====
+
+================================================================================
+🚀 VoiceForge API - Starting Production Server
+================================================================================
+✓ Environment: production
+✓ Port: 7860
+✓ GPU: CUDA Device 0 (80GB A100)
+✓ Model Cache: /app/ml-cache
+================================================================================
+✓ GPU Detected: NVIDIA L40S
+✓ GPU Memory: 44.39 GB
+✓ PyTorch Version: 2.5.1+cu121
+✓ CUDA Version: 12.1
+================================================================================
+✓ Working Directory: /app
+
+🌐 Starting Express server...
+================================================================================
+
+> rest-express@1.0.0 start
+> NODE_ENV=production node dist/index.js
+
+[Server] Checking database initialization...
+[Server] Failed to initialize database: error: relation "api_keys" does not exist
+    at file:///app/node_modules/@neondatabase/serverless/index.mjs:1345:74
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async NeonPreparedQuery.execute (file:///app/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+    at async DbStorage.getAllApiKeys (file:///app/dist/index.js:926:12)
+    at async registerRoutes (file:///app/dist/index.js:4036:26)
+    at async file:///app/dist/index.js:5326:18 {
+  length: 107,
+  severity: 'ERROR',
+  code: '42P01',
+  detail: undefined,
+  hint: undefined,
+  position: '80',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '1449',
+  routine: 'parserOpenTable'
+}
+[Server] Initializing Python worker pools...
+[PythonBridge] Initializing worker pools...
+[WorkerPool:stt] [WorkerPool] Starting 2 stt workers...
+[WorkerPool:stt] [WorkerPool] All workers started
+[WorkerPool:stt] Ready with 2 workers
+[WorkerPool:stt] [STT] Service initialized (streaming mode)[STT] Service initialized (streaming mode)
+
+[Worker 0] STT service initialized
+[Worker 1] STT service initialized
+[WorkerPool:tts] [WorkerPool] Starting 2 tts workers...
+[WorkerPool:tts] [WorkerPool] All workers started
+[WorkerPool:tts] Ready with 2 workers
+[WorkerPool:hf_tts] [WorkerPool] Starting 2 hf_tts workers...
+[WorkerPool:hf_tts] [WorkerPool] All workers started
+[WorkerPool:hf_tts] Ready with 2 workers
+[WorkerPool:tts] [TTS Streaming] Initialized with models: chatterbox, higgs_audio_v2, styletts2
+[Worker 0] TTS streaming service initialized
+[WorkerPool:tts] [TTS Streaming] Initialized with models: chatterbox, higgs_audio_v2, styletts2
+[Worker 1] TTS streaming service initialized
+[WorkerPool:vllm] [WorkerPool] Starting 1 vllm workers...
+[WorkerPool:vllm] [WorkerPool] All workers started
+[WorkerPool:vllm] Ready with 1 workers
+[WorkerPool:vllm] [VLLM] Agent service initialized (simulation mode)
+[Worker 0] VLLM agent service initialized
+[WorkerPool:hf_tts] [HF-TTS] Warning: HUGGINGFACE_TOKEN not set, using public API (may have rate limits)
+[Worker 0] HF TTS service initialized
+[WorkerPool:hf_tts] [HF-TTS] Warning: HUGGINGFACE_TOKEN not set, using public API (may have rate limits)
+[Worker 1] HF TTS service initialized
+[WorkerPool:clone] [WorkerPool] Starting 1 clone workers...
+[WorkerPool:clone] [WorkerPool] All workers started
+[WorkerPool:clone] Ready with 1 workers
+[PythonBridge] Worker pools initialized
+[Server] Python worker pools initialized successfully
+[TelephonySignaling] WebSocket server initialized
+8:04:03 PM [express] serving on port 7860
+[WorkerPool:clone] [VoiceClone] Service initialized
+[WorkerPool:clone] [Worker 0] Voice cloning service initialized
+ 
