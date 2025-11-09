@@ -2,7 +2,9 @@ name: Deploy to Hugging Face Spaces
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'claude/**'
   workflow_dispatch:
 
 jobs:
