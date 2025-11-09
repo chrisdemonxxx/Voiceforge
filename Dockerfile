@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # VoiceForge API - Production Dockerfile for 80GB A100 GPU Deployment
 # Multi-stage build for optimal image size and performance
 
@@ -12,7 +13,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies (production + dev for build)
-RUN npm ci
+RUN npm ci --timeout=600000 --prefer-offline || npm ci --timeout=600000
 
 # Copy source code
 COPY . .
@@ -56,13 +57,13 @@ WORKDIR /app
 COPY requirements-build.txt requirements-deployment.txt ./
 
 # Stage 1: Install PyTorch with CUDA support
-RUN pip install --no-cache-dir torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
+RUN --mount=type=cache,target=/root/.cache/pip pip install --no-cache-dir torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
 
 # Stage 2: Install build prerequisites (required for vLLM CUDA kernel compilation)
-RUN pip install --no-cache-dir -r requirements-build.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install --no-cache-dir -r requirements-build.txt
 
 # Stage 3: Install ML stack (vLLM will now compile successfully with build deps present)
-RUN pip install --no-cache-dir -r requirements-deployment.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install --no-cache-dir -r requirements-deployment.txt
 
 # Note: Package verification moved to runtime (app.py) since CUDA libs require GPU presence
 
@@ -119,6 +120,7 @@ RUN mkdir -p /app/uploads /app/ml-cache /app/logs
 ENV NODE_ENV=production
 ENV PYTHONUNBUFFERED=1
 ENV CUDA_VISIBLE_DEVICES=0
+ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256,expandable_segments:True
 ENV HF_HOME=/app/ml-cache
 ENV TRANSFORMERS_CACHE=/app/ml-cache
 ENV TORCH_HOME=/app/ml-cache
