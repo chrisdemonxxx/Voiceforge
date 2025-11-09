@@ -1,0 +1,275 @@
+name: Auto-Fix Hugging Face Deployment
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run every 30 minutes to check and fix deployment
+    - cron: '*/30 * * * *'
+
+jobs:
+  monitor-and-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface_hub requests
+
+      - name: Check HF Space Status
+        id: check-status
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python << 'EOF'
+          import os
+          import sys
+          from huggingface_hub import HfApi
+
+          SPACE_ID = "Chrisdemonxxx/VoiceForgeAI"
+          HF_TOKEN = os.getenv("HF_TOKEN")
+
+          try:
+              api = HfApi(token=HF_TOKEN)
+              space_info = api.space_info(repo_id=SPACE_ID)
+
+              status = space_info.runtime.stage if space_info.runtime else 'UNKNOWN'
+              print(f"::set-output name=status::{status}")
+              print(f"Space Status: {status}")
+
+              if status in ['BUILD_ERROR', 'RUNTIME_ERROR', 'ERROR']:
+                  print(f"::set-output name=needs_fix::true")
+                  error_msg = space_info.runtime.error_message if hasattr(space_info.runtime, 'error_message') else 'Unknown error'
+                  print(f"Error: {error_msg}")
+                  # Save error for analysis
+                  with open('hf_error.txt', 'w') as f:
+                      f.write(error_msg)
+              else:
+                  print(f"::set-output name=needs_fix::false")
+
+          except Exception as e:
+              print(f"Error checking space: {e}")
+              print(f"::set-output name=status::ERROR")
+              print(f"::set-output name=needs_fix::true")
+          EOF
+
+      - name: Analyze and Apply Fixes
+        if: steps.check-status.outputs.needs_fix == 'true'
+        run: |
+          python << 'EOF'
+          import os
+          import json
+          import re
+          from pathlib import Path
+
+          print("🔍 Analyzing deployment failure...")
+
+          # Read error if available
+          error_msg = ""
+          if Path('hf_error.txt').exists():
+              error_msg = Path('hf_error.txt').read_text()
+              print(f"Error message: {error_msg}")
+
+          fixes_applied = []
+
+          # Fix 1: Optimize Dockerfile for faster builds
+          dockerfile = Path('Dockerfile')
+          if dockerfile.exists():
+              content = dockerfile.read_text()
+              original = content
+
+              # Add BuildKit syntax for better caching
+              if '# syntax=docker/dockerfile:1' not in content:
+                  content = '# syntax=docker/dockerfile:1\n' + content
+                  print("✓ Added BuildKit syntax")
+
+              # Add --mount=type=cache for pip
+              if '--mount=type=cache' not in content and 'pip install' in content:
+                  content = content.replace(
+                      'RUN pip install',
+                      'RUN --mount=type=cache,target=/root/.cache/pip pip install'
+                  )
+                  print("✓ Added pip cache mounting")
+
+              # Increase npm timeout
+              if 'npm ci' in content and '--timeout' not in content:
+                  content = content.replace(
+                      'RUN npm ci',
+                      'RUN npm ci --timeout=600000 --prefer-offline || npm ci'
+                  )
+                  print("✓ Added npm timeout handling")
+
+              if content != original:
+                  dockerfile.write_text(content)
+                  fixes_applied.append('dockerfile')
+
+          # Fix 2: Optimize requirements
+          req_file = Path('requirements-deployment.txt')
+          if req_file.exists():
+              content = req_file.read_text()
+              original = content
+
+              # Ensure specific versions for stability
+              replacements = {
+                  r'^torch$': 'torch==2.1.2',
+                  r'^transformers$': 'transformers==4.36.2',
+              }
+
+              for pattern, replacement in replacements.items():
+                  if re.search(pattern, content, re.MULTILINE):
+                      content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+
+              if content != original:
+                  req_file.write_text(content)
+                  fixes_applied.append('requirements')
+                  print("✓ Fixed requirements versions")
+
+          # Fix 3: Optimize app.py startup
+          app_file = Path('app.py')
+          if app_file.exists():
+              content = app_file.read_text()
+              original = content
+
+              # Add more robust error handling
+              if 'except Exception as e:' in content and 'traceback' not in content:
+                  if 'import traceback' not in content:
+                      content = content.replace(
+                          'import sys',
+                          'import sys\nimport traceback'
+                      )
+                      fixes_applied.append('app-imports')
+                      print("✓ Added traceback import")
+
+              if content != original:
+                  app_file.write_text(content)
+                  fixes_applied.append('app-startup')
+
+          # Fix 4: Reduce memory footprint
+          dockerfile = Path('Dockerfile')
+          if dockerfile.exists():
+              content = dockerfile.read_text()
+              original = content
+
+              # Optimize CUDA memory allocation
+              if 'PYTORCH_CUDA_ALLOC_CONF' in content:
+                  content = content.replace(
+                      'PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512',
+                      'PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256,expandable_segments:True'
+                  )
+                  print("✓ Optimized CUDA memory allocation")
+
+              if content != original:
+                  dockerfile.write_text(content)
+                  if 'dockerfile' not in fixes_applied:
+                      fixes_applied.append('dockerfile')
+
+          print(f"\n📝 Fixes applied: {', '.join(fixes_applied) if fixes_applied else 'None'}")
+
+          # Save fixes for commit message
+          with open('fixes_applied.txt', 'w') as f:
+              f.write('\n'.join(fixes_applied))
+
+          EOF
+
+      - name: Configure Git
+        if: steps.check-status.outputs.needs_fix == 'true'
+        run: |
+          git config user.name "VoiceForge Auto-Fix Bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and Push Fixes
+        if: steps.check-status.outputs.needs_fix == 'true'
+        run: |
+          FIXES=$(cat fixes_applied.txt 2>/dev/null || echo "general")
+
+          git add -A
+          git diff --staged --quiet || {
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            git commit -m "Auto-fix HF deployment: ${FIXES}
+
+          Automated fixes applied at ${TIMESTAMP}
+          Status: ${{ steps.check-status.outputs.status }}
+
+          Fixes: ${FIXES}"
+
+            # Push to current branch
+            git push origin HEAD
+
+            echo "✅ Fixes pushed successfully"
+          } || {
+            echo "ℹ️  No changes to commit"
+          }
+
+      - name: Trigger HF Deployment
+        if: steps.check-status.outputs.needs_fix == 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # Merge to main to trigger HF deployment
+          git fetch origin main
+          git checkout main
+          git merge ${{ github.ref_name }} --no-edit || git merge ${{ github.ref_name }} -m "Auto-merge fixes from ${{ github.ref_name }}"
+          git push origin main
+
+          echo "🚀 Deployment triggered on Hugging Face"
+
+      - name: Wait and Verify Deployment
+        if: steps.check-status.outputs.needs_fix == 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python << 'EOF'
+          import os
+          import time
+          from huggingface_hub import HfApi
+
+          SPACE_ID = "Chrisdemonxxx/VoiceForgeAI"
+          HF_TOKEN = os.getenv("HF_TOKEN")
+          MAX_WAIT = 1200  # 20 minutes
+          POLL_INTERVAL = 30  # 30 seconds
+
+          api = HfApi(token=HF_TOKEN)
+          start_time = time.time()
+
+          print("⏳ Waiting for deployment to complete...")
+
+          while time.time() - start_time < MAX_WAIT:
+              try:
+                  space_info = api.space_info(repo_id=SPACE_ID)
+                  status = space_info.runtime.stage if space_info.runtime else 'UNKNOWN'
+
+                  elapsed = int(time.time() - start_time)
+                  print(f"Status: {status} (elapsed: {elapsed}s)")
+
+                  if status == 'RUNNING':
+                      print("✅ Deployment successful!")
+                      break
+                  elif status in ['BUILD_ERROR', 'RUNTIME_ERROR', 'ERROR']:
+                      print(f"❌ Deployment failed: {status}")
+                      break
+
+                  time.sleep(POLL_INTERVAL)
+              except Exception as e:
+                  print(f"⚠️  Error checking status: {e}")
+                  time.sleep(POLL_INTERVAL)
+
+          EOF
+
+      - name: Report Status
+        if: always()
+        run: |
+          echo "📊 Deployment Automation Complete"
+          echo "Status: ${{ steps.check-status.outputs.status }}"
+          echo "Needed Fix: ${{ steps.check-status.outputs.needs_fix }}"
