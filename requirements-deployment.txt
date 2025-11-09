@@ -4,13 +4,9 @@
 # ============================================================================
 # Core ML Framework (CUDA 12.1 wheels for GPU support)
 # ============================================================================
-# Install PyTorch with CUDA 12.1 support
-# CRITICAL: Must use CUDA wheels for GPU deployment on A100
---index-url https://download.pytorch.org/whl/cu121
-torch==2.1.2+cu121
-torchaudio==2.1.2+cu121
---index-url https://pypi.org/simple
-# NOTE: transformers/accelerate/optimum versions coupled - parler-tts requires transformers==4.46.1
+# NOTE: PyTorch with CUDA 12.1 is installed separately in Dockerfile (line 60)
+# to ensure proper CUDA wheel installation. Do not add torch/torchaudio here.
+# transformers/accelerate/optimum versions coupled - parler-tts requires transformers==4.46.1
 transformers==4.46.1
 accelerate==0.27.2
 optimum==1.18.0
