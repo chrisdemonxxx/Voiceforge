@@ -1,0 +1,32 @@
+━━━━━━━━━━━━━━━━━━━━━━━━ 235.8/235.8 KB 170.3 MB/s eta 0:00:00
+Collecting pysbd>=0.3.4
+  Downloading pysbd-0.3.4-py3-none-any.whl (71 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 71.1/71.1 KB 466.8 MB/s eta 0:00:00
+Collecting pypinyin
+  Downloading pypinyin-0.55.0-py2.py3-none-any.whl (840 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 840.2/840.2 KB 520.9 MB/s eta 0:00:00
+INFO: pip is looking at multiple versions of parler-tts to determine which version is compatible with other requirements. This could take a while.
+INFO: pip is looking at multiple versions of optimum to determine which version is compatible with other requirements. This could take a while.
+INFO: pip is looking at multiple versions of accelerate to determine which version is compatible with other requirements. This could take a while.
+INFO: pip is looking at multiple versions of transformers to determine which version is compatible with other requirements. This could take a while.
+INFO: pip is looking at multiple versions of torchvision to determine which version is compatible with other requirements. This could take a while.
+INFO: pip is looking at multiple versions of torchaudio to determine which version is compatible with other requirements. This could take a while.
+INFO: pip is looking at multiple versions of <Python from Requires-Python> to determine which version is compatible with other requirements. This could take a while.
+INFO: pip is looking at multiple versions of torch to determine which version is compatible with other requirements. This could take a while.
+ERROR: Cannot install -r requirements-deployment.txt (line 12), -r requirements-deployment.txt (line 18), -r requirements-deployment.txt (line 19), -r requirements-deployment.txt (line 20), -r requirements-deployment.txt (line 26) and numpy==1.24.3 because these package versions have conflicting dependencies.
+
+The conflict is caused by:
+    The user requested numpy==1.24.3
+    torchvision 0.20.1 depends on numpy
+    transformers 4.46.1 depends on numpy>=1.17
+    accelerate 0.27.2 depends on numpy>=1.17
+    optimum 1.23.3 depends on numpy
+    tts 0.22.0 depends on numpy==1.22.0; python_version <= "3.10"
+
+To fix this you could try to:
+1. loosen the range of package versions you've specified
+2. remove package versions to allow pip attempt to solve the dependency conflict
+
+ERROR: ResolutionImpossible: for help visit https://pip.pypa.io/en/latest/topics/dependency-resolution/#dealing-with-dependency-conflicts
+
+--> ERROR: process "/bin/sh -c pip install --no-cache-dir -r requirements-deployment.txt" did not complete successfully: exit code: 1
