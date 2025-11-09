@@ -63,6 +63,25 @@ if not Path('/app/node_modules').exists():
     subprocess.run(['npm', 'ci'], check=True)
     print("✓ Node.js dependencies installed")
 
+# Initialize database tables
+print("\n🗄️  Initializing database...")
+print("=" * 80)
+try:
+    result = subprocess.run(
+        ['npm', 'run', 'db:push'],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60
+    )
+    print("✓ Database tables created/updated successfully")
+except subprocess.CalledProcessError as e:
+    print(f"⚠️  Database initialization warning: {e.stderr}")
+    print("Continuing with server startup (tables may already exist)...")
+except subprocess.TimeoutExpired:
+    print("⚠️  Database initialization timed out")
+    print("Continuing with server startup...")
+
 # Start the Express server
 print("\n🌐 Starting Express server...")
 print("=" * 80)
