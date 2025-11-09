@@ -74,7 +74,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     next();
   };
 
-  // API Key Management Routes
+  // API Key Management Routes (no auth required for dashboard management)
   app.get("/api/keys", async (req, res) => {
     try {
       const keys = await storage.getAllApiKeys();
@@ -234,12 +234,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Usage Stats Endpoint
-  app.get("/api/usage", authenticateApiKey, async (req, res) => {
+  // Usage Stats Endpoint (no auth required for dashboard display)
+  app.get("/api/usage", async (req, res) => {
     try {
       const keys = await storage.getAllApiKeys();
       const totalUsage = keys.reduce((sum, key) => sum + key.usage, 0);
-      
+
       const stats = {
         totalRequests: totalUsage,
         successRate: 98.5,
@@ -250,7 +250,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vadRequests: Math.floor(totalUsage * 0.07),
         vllmRequests: Math.floor(totalUsage * 0.02),
       };
-      
+
       res.json(stats);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

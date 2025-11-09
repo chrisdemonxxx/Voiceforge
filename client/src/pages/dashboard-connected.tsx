@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Mic2,
@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AudioPlayer } from "@/components/audio-player";
 import { ModelCard } from "@/components/model-card";
 import { MODEL_INFO } from "@/lib/constants";
@@ -39,6 +40,16 @@ export default function Dashboard() {
   const [ttsText, setTtsText] = useState("");
   const [audioFormat, setAudioFormat] = useState("wav");
   const [generatedAudio, setGeneratedAudio] = useState<string | null>(null);
+  const [sttFile, setSttFile] = useState<File | null>(null);
+  const [sttResult, setSttResult] = useState<string>("");
+  const [vadFile, setVadFile] = useState<File | null>(null);
+  const [cloneName, setCloneName] = useState("");
+  const [cloneFile, setCloneFile] = useState<File | null>(null);
+  const [createKeyDialogOpen, setCreateKeyDialogOpen] = useState(false);
+  const [newKeyName, setNewKeyName] = useState("");
+  const sttInputRef = useRef<HTMLInputElement>(null);
+  const vadInputRef = useRef<HTMLInputElement>(null);
+  const cloneInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch API keys
   const { data: apiKeys, isLoading: keysLoading } = useQuery<ApiKey[]>({
@@ -54,11 +65,12 @@ export default function Dashboard() {
   // TTS Generation Mutation
   const ttsMutation = useMutation({
     mutationFn: async (data: { text: string; model: string; format: string }) => {
-      return apiRequest("POST", "/api/tts", data);
+      const response = await apiRequest("POST", "/api/tts", data);
+      const audioBlob = await response.blob();
+      return URL.createObjectURL(audioBlob);
     },
-    onSuccess: (data) => {
-      // In a real implementation, this would return audio data
-      setGeneratedAudio("/placeholder-audio.mp3");
+    onSuccess: (audioUrl) => {
+      setGeneratedAudio(audioUrl);
       toast({
         title: "Speech generated",
         description: `Audio generated using ${MODEL_INFO[selectedModel].name}`,
@@ -115,6 +127,114 @@ export default function Dashboard() {
     },
   });
 
+  // STT Mutation
+  const sttMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("audio", file);
+      formData.append("language", "en");
+
+      const apiKey = localStorage.getItem("voiceforge_api_key");
+      const response = await fetch("/api/stt", {
+        method: "POST",
+        headers: apiKey ? { "Authorization": `Bearer ${apiKey}` } : {},
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`${response.status}: ${await response.text()}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setSttResult(data.text);
+      toast({
+        title: "Transcription complete",
+        description: `Confidence: ${Math.round((data.confidence || 0) * 100)}%`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Transcription failed",
+        description: error.message || "Failed to transcribe audio",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // VAD Mutation
+  const vadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("audio", file);
+
+      const apiKey = localStorage.getItem("voiceforge_api_key");
+      const response = await fetch("/api/vad", {
+        method: "POST",
+        headers: apiKey ? { "Authorization": `Bearer ${apiKey}` } : {},
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`${response.status}: ${await response.text()}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Voice detection complete",
+        description: `Found ${data.segments.length} speech segments`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Detection failed",
+        description: error.message || "Failed to detect voice activity",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Voice Clone Mutation
+  const cloneMutation = useMutation({
+    mutationFn: async ({ name, file }: { name: string; file: File }) => {
+      const formData = new FormData();
+      formData.append("reference", file);
+      formData.append("name", name);
+      formData.append("model", selectedModel);
+
+      const apiKey = localStorage.getItem("voiceforge_api_key");
+      const response = await fetch("/api/clone-voice", {
+        method: "POST",
+        headers: apiKey ? { "Authorization": `Bearer ${apiKey}` } : {},
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`${response.status}: ${await response.text()}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Voice cloning initiated",
+        description: data.message,
+      });
+      setCloneName("");
+      setCloneFile(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Cloning failed",
+        description: error.message || "Failed to clone voice",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleGenerateTTS = () => {
     if (!ttsText.trim()) return;
     
@@ -138,10 +258,21 @@ export default function Dashboard() {
   };
 
   const handleCreateKey = () => {
-    const name = prompt("Enter a name for this API key:");
-    if (name) {
-      createKeyMutation.mutate(name);
+    if (!newKeyName.trim()) {
+      toast({
+        title: "Invalid name",
+        description: "Please enter a name for the API key",
+        variant: "destructive",
+      });
+      return;
     }
+
+    createKeyMutation.mutate(newKeyName, {
+      onSuccess: () => {
+        setCreateKeyDialogOpen(false);
+        setNewKeyName("");
+      },
+    });
   };
 
   return (
@@ -367,33 +498,90 @@ export default function Dashboard() {
                   )}
                 </TabsContent>
 
-                {/* Other tabs remain the same but disabled for MVP */}
+                {/* STT Tab */}
                 <TabsContent value="stt" className="space-y-6 mt-6">
-                  <div className="text-center py-12 border-2 border-dashed border-border rounded-lg">
+                  <input
+                    type="file"
+                    ref={sttInputRef}
+                    className="hidden"
+                    accept="audio/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setSttFile(file);
+                        sttMutation.mutate(file);
+                      }
+                    }}
+                  />
+                  <div
+                    className="text-center py-12 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary transition-colors"
+                    onClick={() => sttInputRef.current?.click()}
+                  >
                     <Upload className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                     <p className="text-sm font-medium text-foreground mb-1">
-                      Upload Audio File
+                      {sttFile ? sttFile.name : "Upload Audio File"}
                     </p>
                     <p className="text-xs text-muted-foreground mb-4">
                       Support for WAV, MP3, FLAC, OGG formats
                     </p>
-                    <Button data-testid="button-upload-audio">
-                      Select File
+                    <Button data-testid="button-upload-audio" disabled={sttMutation.isPending}>
+                      {sttMutation.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Transcribing...
+                        </>
+                      ) : (
+                        "Select File"
+                      )}
                     </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Transcription Result</Label>
+                    <Textarea
+                      readOnly
+                      value={sttResult}
+                      placeholder="Transcribed text will appear here..."
+                      className="min-h-[120px] resize-none bg-muted"
+                      data-testid="output-transcription"
+                    />
                   </div>
                 </TabsContent>
 
                 <TabsContent value="vad" className="space-y-6 mt-6">
-                  <div className="text-center py-12 border-2 border-dashed border-border rounded-lg">
+                  <input
+                    type="file"
+                    ref={vadInputRef}
+                    className="hidden"
+                    accept="audio/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setVadFile(file);
+                        vadMutation.mutate(file);
+                      }
+                    }}
+                  />
+                  <div
+                    className="text-center py-12 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary transition-colors"
+                    onClick={() => vadInputRef.current?.click()}
+                  >
                     <Activity className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                     <p className="text-sm font-medium text-foreground mb-1">
-                      Voice Activity Detection
+                      {vadFile ? vadFile.name : "Voice Activity Detection"}
                     </p>
                     <p className="text-xs text-muted-foreground mb-4">
                       Upload audio to detect speech segments using Silero VAD
                     </p>
-                    <Button data-testid="button-upload-vad">
-                      Select Audio File
+                    <Button data-testid="button-upload-vad" disabled={vadMutation.isPending}>
+                      {vadMutation.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Analyzing...
+                        </>
+                      ) : (
+                        "Select Audio File"
+                      )}
                     </Button>
                   </div>
                 </TabsContent>
@@ -404,26 +592,60 @@ export default function Dashboard() {
                       <Label htmlFor="clone-name">Voice Name</Label>
                       <Input
                         id="clone-name"
+                        value={cloneName}
+                        onChange={(e) => setCloneName(e.target.value)}
                         placeholder="e.g., My Custom Voice"
                         data-testid="input-clone-name"
+                        disabled={cloneMutation.isPending}
                       />
                     </div>
 
                     <div className="space-y-2">
                       <Label>Reference Audio (5+ seconds)</Label>
-                      <div className="border-2 border-dashed border-border rounded-lg p-6 text-center">
+                      <input
+                        type="file"
+                        ref={cloneInputRef}
+                        className="hidden"
+                        accept="audio/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setCloneFile(file);
+                          }
+                        }}
+                      />
+                      <div
+                        className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary transition-colors"
+                        onClick={() => cloneInputRef.current?.click()}
+                      >
                         <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
                         <p className="text-sm text-muted-foreground">
-                          Upload a clear 5-10 second audio sample
+                          {cloneFile ? cloneFile.name : "Upload a clear 5-10 second audio sample"}
                         </p>
                         <Button className="mt-4" variant="outline" data-testid="button-upload-reference">
-                          Select File
+                          {cloneFile ? "Change File" : "Select File"}
                         </Button>
                       </div>
                     </div>
 
-                    <Button className="w-full" data-testid="button-create-voice">
-                      Create Voice Clone
+                    <Button
+                      className="w-full"
+                      data-testid="button-create-voice"
+                      disabled={!cloneName.trim() || !cloneFile || cloneMutation.isPending}
+                      onClick={() => {
+                        if (cloneName.trim() && cloneFile) {
+                          cloneMutation.mutate({ name: cloneName, file: cloneFile });
+                        }
+                      }}
+                    >
+                      {cloneMutation.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Cloning Voice...
+                        </>
+                      ) : (
+                        "Create Voice Clone"
+                      )}
                     </Button>
                   </div>
                 </TabsContent>
@@ -441,12 +663,8 @@ export default function Dashboard() {
                     Manage your API keys for authentication
                   </CardDescription>
                 </div>
-                <Button onClick={handleCreateKey} disabled={createKeyMutation.isPending} data-testid="button-create-api-key">
-                  {createKeyMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="mr-2 h-4 w-4" />
-                  )}
+                <Button onClick={() => setCreateKeyDialogOpen(true)} data-testid="button-create-api-key">
+                  <Plus className="mr-2 h-4 w-4" />
                   Create New Key
                 </Button>
               </div>
@@ -609,6 +827,60 @@ export default function Dashboard() {
           )}
         </div>
       </main>
+
+      {/* Create API Key Dialog */}
+      <Dialog open={createKeyDialogOpen} onOpenChange={setCreateKeyDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New API Key</DialogTitle>
+            <DialogDescription>
+              Give your API key a descriptive name to help you identify it later.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="key-name">Key Name</Label>
+              <Input
+                id="key-name"
+                placeholder="e.g., Production API, Development"
+                value={newKeyName}
+                onChange={(e) => setNewKeyName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newKeyName.trim()) {
+                    handleCreateKey();
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreateKeyDialogOpen(false);
+                setNewKeyName("");
+              }}
+              disabled={createKeyMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateKey}
+              disabled={!newKeyName.trim() || createKeyMutation.isPending}
+            >
+              {createKeyMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                "Create Key"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
