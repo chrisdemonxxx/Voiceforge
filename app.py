@@ -57,30 +57,38 @@ print("=" * 80)
 # Change to app directory
 os.chdir('/app')
 
-# Ensure node_modules are available
+# Skip npm ci in production (node_modules already in container)
 if not Path('/app/node_modules').exists():
-    print("📦 Installing Node.js dependencies...")
+    print("📦 node_modules not found - installing dependencies...")
     subprocess.run(['npm', 'ci'], check=True)
     print("✓ Node.js dependencies installed")
+else:
+    print("✓ Node.js dependencies already available (production container)")
 
-# Initialize database tables
-print("\n🗄️  Initializing database...")
-print("=" * 80)
-try:
-    result = subprocess.run(
-        ['npm', 'run', 'db:push'],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=60
-    )
-    print("✓ Database tables created/updated successfully")
-except subprocess.CalledProcessError as e:
-    print(f"⚠️  Database initialization warning: {e.stderr}")
-    print("Continuing with server startup (tables may already exist)...")
-except subprocess.TimeoutExpired:
-    print("⚠️  Database initialization timed out")
-    print("Continuing with server startup...")
+# Initialize database tables (only if DATABASE_URL is available)
+database_url = os.environ.get('DATABASE_URL')
+if database_url:
+    print("\n🗄️  Initializing database...")
+    print("=" * 80)
+    try:
+        result = subprocess.run(
+            ['npm', 'run', 'db:push'],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        print("✓ Database tables created/updated successfully")
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️  Database initialization warning: {e.stderr}")
+        print("Continuing with server startup (tables may already exist)...")
+    except subprocess.TimeoutExpired:
+        print("⚠️  Database initialization timed out")
+        print("Continuing with server startup...")
+else:
+    print("\n📝 DATABASE_URL not set - running without persistent database")
+    print("   (Using in-memory storage for demo purposes)")
+    print("=" * 80)
 
 # Start the Express server
 print("\n🌐 Starting Express server...")
