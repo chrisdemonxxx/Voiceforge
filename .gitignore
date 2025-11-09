@@ -11,3 +11,7 @@ __pycache__/
 *.pyc
 ml-cache/
 .cache/
+
+# Deployment artifacts (not needed in production)
+voiceforge-deploy.tar.gz
+attached_assets/
