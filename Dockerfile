@@ -52,16 +52,21 @@ RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
 WORKDIR /app
 
-# Copy Python deployment requirements
-COPY requirements-deployment.txt .
+# Copy Python requirements (staged installation for vLLM compatibility)
+COPY requirements-build.txt requirements-deployment.txt ./
 
-# Install Python ML dependencies (with GPU support)
-# Install PyTorch with CUDA first, then other dependencies
+# Stage 1: Install PyTorch with CUDA support
 RUN pip install --no-cache-dir torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
+
+# Stage 2: Install build prerequisites (required for vLLM CUDA kernel compilation)
+RUN pip install --no-cache-dir -r requirements-build.txt
+
+# Stage 3: Install ML stack (vLLM will now compile successfully with build deps present)
 RUN pip install --no-cache-dir -r requirements-deployment.txt
 
-# Verify PyTorch installation (CUDA check happens at runtime, not build time)
+# Verify installations (CUDA check happens at runtime, not build time)
 RUN python -c "import torch; print(f'✓ PyTorch {torch.__version__} installed (CUDA support will be verified at runtime)')"
+RUN python -c "import vllm; print(f'✓ vLLM {vllm.__version__} installed successfully')"
 
 # ============================================================================
 # Stage 3: Final Production Image
