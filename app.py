@@ -95,13 +95,31 @@ print("\n🌐 Starting Express server...")
 print("=" * 80)
 
 # Start server process
-server_process = subprocess.Popen(
-    ['npm', 'start'],
-    stdout=subprocess.PIPE,
-    stderr=subprocess.STDOUT,
-    text=True,
-    bufsize=1
-)
+print(f"Working directory: {os.getcwd()}")
+print(f"node_modules exists: {Path('/app/node_modules').exists()}")
+print(f"dist exists: {Path('/app/dist').exists()}")
+print(f"dist/index.js exists: {Path('/app/dist/index.js').exists()}")
+print("=" * 80)
+
+try:
+    server_process = subprocess.Popen(
+        ['npm', 'start'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
+    )
+except Exception as e:
+    print(f"❌ Failed to start server: {e}")
+    print(f"Trying direct node execution...")
+    server_process = subprocess.Popen(
+        ['node', 'dist/index.js'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env={**os.environ, 'NODE_ENV': 'production', 'PORT': '7860'}
+    )
 
 # Handle graceful shutdown
 def signal_handler(sig, frame):
