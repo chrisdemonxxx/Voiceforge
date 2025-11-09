@@ -33,8 +33,9 @@ webrtcvad==2.0.10
 # ============================================================================
 # Voice Large Language Model (VLLM)
 # ============================================================================
-# NOTE: vllm/sentencepiece/protobuf versions coupled - using 0.6.x (last supporting torch 2.1)
-vllm==0.6.4
+# NOTE: vllm 0.4.3 is last version compatible with PyTorch 2.1.2+cu121
+# vllm 0.6+ requires PyTorch 2.5+ (incompatible with current torch version)
+vllm==0.4.3
 sentencepiece==0.2.0
 protobuf==4.25.3
 
