@@ -37,20 +37,33 @@ print(f"✓ GPU: CUDA Device 0 (80GB A100)")
 print(f"✓ Model Cache: {os.environ.get('HF_HOME')}")
 print("=" * 80)
 
-# Check if running on GPU
+# Verify ML packages and GPU availability
+print("\n🔍 Verifying ML Environment...")
+print("=" * 80)
+
 try:
     import torch
+    print(f"✓ PyTorch {torch.__version__} loaded")
+    print(f"✓ CUDA available: {torch.cuda.is_available()}")
+    
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
         gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
         print(f"✓ GPU Detected: {gpu_name}")
         print(f"✓ GPU Memory: {gpu_memory:.2f} GB")
-        print(f"✓ PyTorch Version: {torch.__version__}")
         print(f"✓ CUDA Version: {torch.version.cuda}")
     else:
         print("⚠️  WARNING: CUDA not available, running on CPU")
-except ImportError:
-    print("⚠️  WARNING: PyTorch not installed")
+except ImportError as e:
+    print(f"❌ ERROR: PyTorch not installed: {e}")
+    sys.exit(1)
+
+try:
+    import vllm
+    print(f"✓ vLLM {vllm.__version__} loaded successfully")
+except ImportError as e:
+    print(f"⚠️  WARNING: vLLM not installed: {e}")
+    print("   Some features may not be available")
 
 print("=" * 80)
 
