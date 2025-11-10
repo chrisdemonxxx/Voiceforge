@@ -121,9 +121,6 @@ COPY app.py ./
 COPY drizzle.config.ts ./
 COPY tsconfig.json ./
 
-# Create directories for runtime data
-RUN mkdir -p /app/uploads /app/ml-cache /app/logs
-
 # Set environment variables
 ENV NODE_ENV=production
 ENV PYTHONUNBUFFERED=1
