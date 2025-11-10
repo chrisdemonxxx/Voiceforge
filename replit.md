@@ -38,6 +38,7 @@ The platform features a premium royal purple theme, designed to match and exceed
 *   **Python Version Fix** (Nov 10, 2025): Changed from Python 3.11 to Python 3.10 (Ubuntu 22.04 system default) to resolve build failures
 *   **Dockerfile Path Correction**: Fixed multi-stage build to copy pip packages from `/usr/local/lib/python3.10/dist-packages` (actual location) instead of `/usr/local/lib/python3.10`
 *   **Build Verification**: Added sanity checks in python-base stage to log site-packages paths for debugging
+*   **pip3 Direct Usage Fix**: Removed problematic `update-alternatives` for pip that was failing in HF Spaces build environment; using `pip3` directly throughout Dockerfile
 *   **Deployment Pipeline**: Replit → GitHub → GitHub Actions → HF Spaces (fully automated)
 
 ## External Dependencies
