@@ -25,11 +25,11 @@ RUN npm run build
 # ============================================================================
 FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 AS python-base
 
-# Install system dependencies
+# Install system dependencies (Ubuntu 22.04 ships with Python 3.10)
 RUN apt-get update && apt-get install -y \
-    python3.11 \
+    python3 \
     python3-pip \
-    python3.11-dev \
+    python3-dev \
     git \
     wget \
     curl \
@@ -46,8 +46,8 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python 3.11 as default
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+# Set Python 3.10 as default (already the system default)
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
 WORKDIR /app
@@ -82,14 +82,14 @@ RUN apt-get update && apt-get install -y \
     && apt-get update \
     && apt-get install -y \
     nodejs \
-    python3.11 \
+    python3 \
     python3-pip \
     ffmpeg \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python 3.11 as default
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+# Set Python 3.10 as default (already the system default)
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 
 WORKDIR /app
 
@@ -100,8 +100,8 @@ COPY --from=node-builder /app/package*.json ./
 # Copy built frontend and backend (dist contains both)
 COPY --from=node-builder /app/dist ./dist
 
-# Copy Python dependencies
-COPY --from=python-base /usr/local/lib/python3.11 /usr/local/lib/python3.11
+# Copy Python dependencies (Python 3.10 from Ubuntu 22.04)
+COPY --from=python-base /usr/local/lib/python3.10 /usr/local/lib/python3.10
 
 # Copy source files needed at runtime
 COPY server ./server

@@ -1,6 +1,6 @@
 """
 VoiceForge API - Hugging Face Spaces Entry Point
-Production deployment for 80GB A100 GPU
+Production deployment for 80GB A100 GPU (Python 3.10)
 
 This file serves as the main entry point for Hugging Face Spaces.
 It starts the Express server and exposes the API endpoints.
