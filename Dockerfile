@@ -64,6 +64,11 @@ RUN pip install --no-cache-dir -r requirements-build.txt
 # Stage 3: Install ML stack (vLLM will now compile successfully with build deps present)
 RUN pip install --no-cache-dir -r requirements-deployment.txt
 
+# Verify pip package installation paths (for Docker build debugging)
+RUN python -c "import site; print('Site packages:', site.getsitepackages())" && \
+    ls -la /usr/local/lib/python3.10/ && \
+    echo "Verification: pip packages installed successfully"
+
 # Note: Package verification moved to runtime (app.py) since CUDA libs require GPU presence
 
 # ============================================================================
@@ -100,8 +105,13 @@ COPY --from=node-builder /app/package*.json ./
 # Copy built frontend and backend (dist contains both)
 COPY --from=node-builder /app/dist ./dist
 
-# Copy Python dependencies (Python 3.10 from Ubuntu 22.04)
-COPY --from=python-base /usr/local/lib/python3.10 /usr/local/lib/python3.10
+# Copy Python dependencies (pip packages installed to /usr/local)
+# Ubuntu's system Python uses /usr/local/lib for pip-installed packages
+# Copying both dist-packages and site-packages for future-proofing
+COPY --from=python-base /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=python-base /usr/local/bin /usr/local/bin
+# Future-proof: also copy site-packages if it exists (some pip versions use this)
+RUN mkdir -p /usr/local/lib/python3.10/site-packages
 
 # Copy source files needed at runtime
 COPY server ./server

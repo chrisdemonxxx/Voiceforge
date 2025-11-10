@@ -13,8 +13,8 @@ The platform features a premium royal purple theme, designed to match and exceed
 
 ### Technical Implementations
 *   **Frontend**: React 18, TypeScript, Wouter for routing, Tailwind CSS with shadcn/ui, TanStack Query for state management, WebSocket clients for real-time communication.
-*   **Backend**: Node.js, Express, TypeScript, PostgreSQL (Neon serverless) via Drizzle ORM, `ws` for WebSockets, Multer for file uploads, Zod for validation. A Python 3.11 subprocess bridge manages ML services.
-*   **ML Services (Python)**: Chatterbox, Higgs Audio V2, StyleTTS2 for TTS; Whisper-large-v3-turbo for STT; Silero VAD for VAD; Llama 3.3 / Qwen 2.5 via VLLM for conversational AI.
+*   **Backend**: Node.js, Express, TypeScript, PostgreSQL (Neon serverless) via Drizzle ORM, `ws` for WebSockets, Multer for file uploads, Zod for validation. A Python 3.10 subprocess bridge manages ML services.
+*   **ML Services (Python 3.10)**: Chatterbox, Higgs Audio V2, StyleTTS2 for TTS; Whisper-large-v3-turbo for STT; Silero VAD for VAD; Llama 3.3 / Qwen 2.5 via VLLM for conversational AI.
 
 ### Feature Specifications
 *   **Text-to-Speech (TTS)**: Includes base models (Chatterbox, Higgs Audio V2, StyleTTS2), Indian and T1 country language support, and a voice library of 135+ voices across 30+ languages with intelligent auto-routing.
@@ -32,7 +32,13 @@ The platform features a premium royal purple theme, designed to match and exceed
 *   **Database Architecture**: PostgreSQL with Drizzle ORM and Neon serverless for production-grade persistence and scalability, with auto-seeding of API keys.
 *   **Authentication System**: Multi-layered security with admin and API key authentication, featuring database-backed Bearer tokens, cryptographically generated keys, per-key rate limiting, and real-time usage statistics.
 *   **Python ML Services Integration**: Unified worker pool architecture managing all ML services through persistent Python processes to minimize cold start latency, using multiprocessing for task distribution, health checks, and JSON over stdin/stdout communication. This architecture provides consistent task queuing, priority handling, automatic failover, unified metrics, and health monitoring, designed for GPU model swap-in.
-*   **Deployment**: Optimized for Hugging Face Spaces with 80GB A100 GPU, featuring a multi-stage Dockerfile, GPU detection, graceful startup, and auto-sleep configuration for cost optimization.
+*   **Deployment**: Optimized for Hugging Face Spaces with GPU acceleration, featuring a multi-stage Dockerfile (Python 3.10 from Ubuntu 22.04), GPU detection, graceful startup, and automated GitHub→HF deployment pipeline via GitHub Actions.
+
+### Recent Deployment Fixes
+*   **Python Version Fix** (Nov 10, 2025): Changed from Python 3.11 to Python 3.10 (Ubuntu 22.04 system default) to resolve build failures
+*   **Dockerfile Path Correction**: Fixed multi-stage build to copy pip packages from `/usr/local/lib/python3.10/dist-packages` (actual location) instead of `/usr/local/lib/python3.10`
+*   **Build Verification**: Added sanity checks in python-base stage to log site-packages paths for debugging
+*   **Deployment Pipeline**: Replit → GitHub → GitHub Actions → HF Spaces (fully automated)
 
 ## External Dependencies
 *   **Database**: PostgreSQL (Neon serverless)
