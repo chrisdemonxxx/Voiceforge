@@ -46,9 +46,6 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python 3.10 as default (already the system default)
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
-
 WORKDIR /app
 
 # Copy Python requirements (staged installation for vLLM compatibility)
@@ -64,7 +61,7 @@ RUN pip3 install --no-cache-dir -r requirements-build.txt
 RUN pip3 install --no-cache-dir -r requirements-deployment.txt
 
 # Verify pip package installation paths (for Docker build debugging)
-RUN python -c "import site; print('Site packages:', site.getsitepackages())" && \
+RUN python3 -c "import site; print('Site packages:', site.getsitepackages())" && \
     ls -la /usr/local/lib/python3.10/ && \
     echo "Verification: pip packages installed successfully"
 
@@ -91,9 +88,6 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
-
-# Set Python 3.10 as default (already the system default)
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 
 WORKDIR /app
 
@@ -137,4 +131,4 @@ EXPOSE 7860
 #     CMD curl -f http://localhost:7860/api/health || exit 1
 
 # Start the application (via app.py which handles database initialization)
-CMD ["python", "app.py"]
+CMD ["python3", "app.py"]

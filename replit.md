@@ -40,6 +40,7 @@ The platform features a premium royal purple theme, designed to match and exceed
 *   **Build Verification**: Added sanity checks in python-base stage to log site-packages paths for debugging
 *   **pip3 Direct Usage Fix**: Removed problematic `update-alternatives` for pip that was failing in HF Spaces build environment; using `pip3` directly throughout Dockerfile
 *   **Runtime Directory Creation**: Moved directory creation from Dockerfile RUN command to app.py startup to avoid Docker build cache miss errors; directories now created at runtime with proper error handling
+*   **Python3 Direct Usage**: Removed ALL `update-alternatives` commands (HF Spaces doesn't support them); using `python3` and `pip3` explicitly everywhere instead of creating symlinks
 *   **Deployment Pipeline**: Replit → GitHub → GitHub Actions → HF Spaces (fully automated)
 
 ## External Dependencies
