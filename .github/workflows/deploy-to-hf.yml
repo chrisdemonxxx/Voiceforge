@@ -39,6 +39,10 @@ jobs:
                     --exclude='__pycache__' \
                     ../ ./
           
+          # Add cache-busting comment to Dockerfile to force fresh build
+          echo "" >> Dockerfile
+          echo "# Build: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> Dockerfile
+          
           git add -A
           git diff-index --quiet HEAD || git commit -m "Deploy from GitHub: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" || git commit -m "Initial deployment"
           git push origin main --force
