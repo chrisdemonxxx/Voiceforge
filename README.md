@@ -3,7 +3,8 @@ title: VoiceForge API
 emoji: 🎙️
 colorFrom: purple
 colorTo: blue
-sdk: docker
+sdk: gradio
+python_version: 3.11
 app_port: 7860
 pinned: false
 license: mit

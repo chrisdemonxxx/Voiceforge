@@ -413,7 +413,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           syntheticData.voiceDescription || "",
           characteristics
         );
-        
+
+        // Validate result from Python worker
+        if (!result || typeof result !== 'object') {
+          console.error("[Voice Cloning] Invalid result from Python worker:", result);
+          return res.status(500).json({
+            error: "Voice cloning failed",
+            message: "Invalid response from voice cloning service"
+          });
+        }
+
         // Save to database
         const clonedVoice = await storage.createClonedVoice({
           apiKeyId: apiKey.id,
@@ -465,7 +474,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         result = await pythonBridge.createProfessionalClone(cloneId, req.file.buffer, instantData.name);
       }
-      
+
+      // Validate result from Python worker
+      if (!result || typeof result !== 'object') {
+        console.error("[Voice Cloning] Invalid result from Python worker:", result);
+        return res.status(500).json({
+          error: "Voice cloning failed",
+          message: "Invalid response from voice cloning service"
+        });
+      }
+
       // Check for cloning failure
       if (result.status === "failed") {
         return res.status(400).json({
@@ -508,18 +526,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         setTimeout(() => clearInterval(pollInterval), 120000);
       }
       
-      res.json({
+      // Add defaults for optional fields
+      const response = {
         id: clonedVoice.id,
         name: clonedVoice.name,
         model: clonedVoice.model,
-        status: clonedVoice.status,
+        status: result.status || clonedVoice.status || "processing",
         cloningMode: clonedVoice.cloningMode,
-        processingStatus: clonedVoice.processingStatus,
-        trainingProgress: result.training_progress,
-        qualityScore: result.quality_score,
+        processingStatus: clonedVoice.processingStatus || "processing",
+        trainingProgress: result.training_progress || 0,
+        qualityScore: result.quality_score || 0,
         createdAt: clonedVoice.createdAt,
-        characteristics: clonedVoice.voiceCharacteristics,
-      });
+        characteristics: clonedVoice.voiceCharacteristics || {},
+      };
+
+      res.json(response);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ error: "Invalid input", details: error.errors });

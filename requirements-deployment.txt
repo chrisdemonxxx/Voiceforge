@@ -7,9 +7,10 @@
 # NOTE: PyTorch with CUDA 12.1 is installed separately in Dockerfile (line 60)
 # to ensure proper CUDA wheel installation. Do not add torch/torchaudio here.
 # transformers/accelerate/optimum versions coupled - parler-tts requires transformers==4.46.1
+# optimum 1.23.3+ supports transformers 4.46.1 (1.18.0 requires <4.40.0)
 transformers==4.46.1
 accelerate==0.27.2
-optimum==1.18.0
+optimum==1.23.3
 
 # ============================================================================
 # Text-to-Speech (TTS) Models
@@ -33,9 +34,10 @@ webrtcvad==2.0.10
 # ============================================================================
 # Voice Large Language Model (VLLM)
 # ============================================================================
-# NOTE: vllm 0.4.3 is last version compatible with PyTorch 2.1.2+cu121
-# vllm 0.6+ requires PyTorch 2.5+ (incompatible with current torch version)
-vllm==0.4.3
+# NOTE: vLLM temporarily disabled due to PyTorch version conflicts
+# vllm 0.6.4 requires PyTorch 2.5.1, but openai-whisper requires triton<3 (incompatible)
+# Can be re-enabled once compatible versions are available
+# vllm==0.4.3
 sentencepiece==0.2.0
 protobuf==4.25.3
 

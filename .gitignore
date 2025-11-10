@@ -12,6 +12,18 @@ __pycache__/
 ml-cache/
 .cache/
 
+# Model binaries (prevent git push rejection)
+*.bin
+*.pth
+*.pt
+*.safetensors
+*.onnx
+*.h5
+*.pkl
+*.pickle
+
 # Deployment artifacts (not needed in production)
 voiceforge-deploy.tar.gz
 attached_assets/
+.local/
+uploads/

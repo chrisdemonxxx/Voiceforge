@@ -46,16 +46,16 @@ class HFTTSService:
             Audio bytes
         """
         try:
-            # Select model URL
-            if model == 'indic_parler_tts':
+            # Select model URL (accept both hyphens and underscores)
+            if model in ['indic_parler_tts', 'indic-parler-tts']:
                 api_url = INDIC_PARLER_URL
-            elif model == 'parler_tts_multilingual':
+                log(f"Using Indic Parler TTS for: '{text[:50]}...'")
+            elif model in ['parler_tts_multilingual', 'parler-tts-multilingual']:
                 api_url = PARLER_MULTI_URL
+                log(f"Using Parler-TTS Multilingual for: '{text[:50]}...'")
             else:
                 raise ValueError(f"Unknown HF TTS model: {model}")
-            
-            log(f"Generating speech with {model}: '{text[:50]}...'")
-            
+
             headers = {}
             if HF_API_TOKEN:
                 headers["Authorization"] = f"Bearer {HF_API_TOKEN}"

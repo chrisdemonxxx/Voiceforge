@@ -191,7 +191,7 @@ export type TTSRequest = z.infer<typeof ttsRequestSchema>;
 // STT Request schema
 export const sttRequestSchema = z.object({
   language: z.string().default("en"),
-  format: AudioFormat,
+  format: AudioFormat.optional().default("wav"),
 });
 
 export type STTRequest = z.infer<typeof sttRequestSchema>;
