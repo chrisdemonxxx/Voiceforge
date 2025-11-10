@@ -62,8 +62,8 @@ try:
     import vllm
     print(f"✓ vLLM {vllm.__version__} loaded successfully")
 except ImportError as e:
-    print(f"⚠️  WARNING: vLLM not installed: {e}")
-    print("   Some features may not be available")
+    print(f"⚠️  vLLM not available (disabled for faster initial deployment)")
+    print("   VLLM features will be unavailable")
 
 print("=" * 80)
 
