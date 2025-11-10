@@ -35,12 +35,12 @@ The platform features a premium royal purple theme, designed to match and exceed
 *   **Deployment**: Optimized for Hugging Face Spaces with GPU acceleration, featuring a multi-stage Dockerfile (Python 3.10 from Ubuntu 22.04), GPU detection, graceful startup, and automated GitHub→HF deployment pipeline via GitHub Actions.
 
 ### Recent Deployment Fixes
-*   **Python Version Fix** (Nov 10, 2025): Changed from Python 3.11 to Python 3.10 (Ubuntu 22.04 system default) to resolve build failures
-*   **Dockerfile Path Correction**: Fixed multi-stage build to copy pip packages from `/usr/local/lib/python3.10/dist-packages` (actual location) instead of `/usr/local/lib/python3.10`
-*   **Build Verification**: Added sanity checks in python-base stage to log site-packages paths for debugging
-*   **pip3 Direct Usage Fix**: Removed problematic `update-alternatives` for pip that was failing in HF Spaces build environment; using `pip3` directly throughout Dockerfile
-*   **Runtime Directory Creation**: Moved directory creation from Dockerfile RUN command to app.py startup to avoid Docker build cache miss errors; directories now created at runtime with proper error handling
-*   **Python3 Direct Usage**: Removed ALL `update-alternatives` commands (HF Spaces doesn't support them); using `python3` and `pip3` explicitly everywhere instead of creating symlinks
+*   **Complete Dockerfile Rewrite** (Nov 10, 2025): Created HF Spaces-optimized Dockerfile following platform best practices:
+    - Proper user permissions: Uses UID 1000 throughout all stages (reuses existing `node` user in Stage 1, creates `user` in other stages)
+    - File ownership: All COPY operations use `--chown=user:user` with USER switch happening AFTER file operations
+    - No update-alternatives: Uses `python3`/`pip3` directly everywhere
+    - Python packages installed with `--user` flag to `/home/user/.local`
+    - Runtime directory creation handled by app.py startup
 *   **Deployment Pipeline**: Replit → GitHub → GitHub Actions → HF Spaces (fully automated)
 
 ## External Dependencies

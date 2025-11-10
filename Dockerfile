@@ -1,23 +1,28 @@
-# VoiceForge API - Production Dockerfile for 80GB A100 GPU Deployment
-# Multi-stage build for optimal image size and performance
+# VoiceForge API - HF Spaces Optimized Dockerfile
+# Production deployment for GPU acceleration (Python 3.10, Node.js 20)
 
 # ============================================================================
 # Stage 1: Node.js Build (Frontend + Backend TypeScript)
 # ============================================================================
 FROM node:20-slim AS node-builder
 
-WORKDIR /app
+# Use existing node user (already UID 1000)
+USER node
+ENV HOME=/home/node \
+    PATH=/home/node/.local/bin:$PATH
 
-# Copy package files
-COPY package*.json ./
+WORKDIR $HOME/app
 
-# Install dependencies (production + dev for build)
+# Copy package files (as node user)
+COPY --chown=node package*.json ./
+
+# Install dependencies
 RUN npm ci
 
 # Copy source code
-COPY . .
+COPY --chown=node . .
 
-# Build frontend and backend (Vite + TypeScript)
+# Build frontend and backend
 RUN npm run build
 
 # ============================================================================
@@ -25,13 +30,12 @@ RUN npm run build
 # ============================================================================
 FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 AS python-base
 
-# Install system dependencies (Ubuntu 22.04 ships with Python 3.10)
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-dev \
     git \
-    wget \
     curl \
     ffmpeg \
     libsndfile1 \
@@ -46,33 +50,32 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Create user with UID 1000
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
 
-# Copy Python requirements (staged installation for vLLM compatibility)
-COPY requirements-build.txt requirements-deployment.txt ./
+WORKDIR $HOME/app
 
-# Stage 1: Install PyTorch with CUDA support (using pip3 directly)
-RUN pip3 install --no-cache-dir torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
+# Copy requirements
+COPY --chown=user requirements-build.txt requirements-deployment.txt ./
 
-# Stage 2: Install build prerequisites (required for vLLM CUDA kernel compilation)
-RUN pip3 install --no-cache-dir -r requirements-build.txt
+# Install PyTorch with CUDA support
+RUN pip3 install --no-cache-dir --user torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
 
-# Stage 3: Install ML stack (vLLM will now compile successfully with build deps present)
-RUN pip3 install --no-cache-dir -r requirements-deployment.txt
+# Install build prerequisites
+RUN pip3 install --no-cache-dir --user -r requirements-build.txt
 
-# Verify pip package installation paths (for Docker build debugging)
-RUN python3 -c "import site; print('Site packages:', site.getsitepackages())" && \
-    ls -la /usr/local/lib/python3.10/ && \
-    echo "Verification: pip packages installed successfully"
-
-# Note: Package verification moved to runtime (app.py) since CUDA libs require GPU presence
+# Install ML stack
+RUN pip3 install --no-cache-dir --user -r requirements-deployment.txt
 
 # ============================================================================
 # Stage 3: Final Production Image
 # ============================================================================
 FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
 
-# Install runtime dependencies (including Node.js 20 from NodeSource)
+# Install runtime dependencies including Node.js 20
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
@@ -89,46 +92,47 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-
-# Copy Node.js production dependencies
-COPY --from=node-builder /app/node_modules ./node_modules
-COPY --from=node-builder /app/package*.json ./
-
-# Copy built frontend and backend (dist contains both)
-COPY --from=node-builder /app/dist ./dist
-
-# Copy Python dependencies (pip packages installed to /usr/local)
-# Ubuntu's system Python uses /usr/local/lib for pip-installed packages
-# Copying both dist-packages and site-packages for future-proofing
-COPY --from=python-base /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
-COPY --from=python-base /usr/local/bin /usr/local/bin
-# Future-proof: also copy site-packages if it exists (some pip versions use this)
-RUN mkdir -p /usr/local/lib/python3.10/site-packages
-
-# Copy source files needed at runtime
-COPY server ./server
-COPY shared ./shared
-COPY db ./db
-COPY requirements-deployment.txt ./
-COPY app.py ./
-COPY drizzle.config.ts ./
-COPY tsconfig.json ./
+# Create user with UID 1000 and set up directories
+RUN useradd -m -u 1000 user && \
+    mkdir -p /home/user/app && \
+    chown -R user:user /home/user
 
 # Set environment variables
-ENV NODE_ENV=production
-ENV PYTHONUNBUFFERED=1
-ENV CUDA_VISIBLE_DEVICES=0
-ENV HF_HOME=/app/ml-cache
-ENV TRANSFORMERS_CACHE=/app/ml-cache
-ENV TORCH_HOME=/app/ml-cache
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH \
+    NODE_ENV=production \
+    PYTHONUNBUFFERED=1 \
+    CUDA_VISIBLE_DEVICES=0
 
-# Expose port 7860 (Hugging Face Spaces standard)
+WORKDIR /home/user/app
+
+# Copy Node.js dependencies and build artifacts (as root with chown)
+COPY --chown=user:user --from=node-builder /home/node/app/node_modules ./node_modules
+COPY --chown=user:user --from=node-builder /home/node/app/package*.json ./
+COPY --chown=user:user --from=node-builder /home/node/app/dist ./dist
+
+# Copy Python dependencies from python-base stage
+COPY --chown=user:user --from=python-base /home/user/.local /home/user/.local
+
+# Copy application source files
+COPY --chown=user:user server ./server
+COPY --chown=user:user shared ./shared
+COPY --chown=user:user db ./db
+COPY --chown=user:user requirements-deployment.txt ./
+COPY --chown=user:user app.py ./
+COPY --chown=user:user drizzle.config.ts ./
+COPY --chown=user:user tsconfig.json ./
+
+# Set ML cache environment variables
+ENV HF_HOME=/home/user/app/ml-cache \
+    TRANSFORMERS_CACHE=/home/user/app/ml-cache \
+    TORCH_HOME=/home/user/app/ml-cache
+
+# Switch to user AFTER all files are copied
+USER user
+
+# Expose port 7860 (HF Spaces standard)
 EXPOSE 7860
 
-# Health check (disabled for initial debugging - HF may be killing container on failed health check)
-# HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-#     CMD curl -f http://localhost:7860/api/health || exit 1
-
-# Start the application (via app.py which handles database initialization)
+# Start application
 CMD ["python3", "app.py"]
