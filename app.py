@@ -70,6 +70,13 @@ print("=" * 80)
 # Change to app directory
 os.chdir('/app')
 
+# Create runtime directories
+print("\n📁 Creating runtime directories...")
+Path('/app/uploads').mkdir(parents=True, exist_ok=True)
+Path('/app/ml-cache').mkdir(parents=True, exist_ok=True)
+Path('/app/logs').mkdir(parents=True, exist_ok=True)
+print("✓ Runtime directories created")
+
 # Skip npm ci in production (node_modules already in container)
 if not Path('/app/node_modules').exists():
     print("📦 node_modules not found - installing dependencies...")
