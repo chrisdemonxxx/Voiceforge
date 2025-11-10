@@ -48,21 +48,20 @@ RUN apt-get update && apt-get install -y \
 
 # Set Python 3.10 as default (already the system default)
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
-RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
 WORKDIR /app
 
 # Copy Python requirements (staged installation for vLLM compatibility)
 COPY requirements-build.txt requirements-deployment.txt ./
 
-# Stage 1: Install PyTorch with CUDA support
-RUN pip install --no-cache-dir torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
+# Stage 1: Install PyTorch with CUDA support (using pip3 directly)
+RUN pip3 install --no-cache-dir torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
 
 # Stage 2: Install build prerequisites (required for vLLM CUDA kernel compilation)
-RUN pip install --no-cache-dir -r requirements-build.txt
+RUN pip3 install --no-cache-dir -r requirements-build.txt
 
 # Stage 3: Install ML stack (vLLM will now compile successfully with build deps present)
-RUN pip install --no-cache-dir -r requirements-deployment.txt
+RUN pip3 install --no-cache-dir -r requirements-deployment.txt
 
 # Verify pip package installation paths (for Docker build debugging)
 RUN python -c "import site; print('Site packages:', site.getsitepackages())" && \
