@@ -12,6 +12,26 @@ __pycache__/
 ml-cache/
 .cache/
 
+# Model binaries (prevent HF push rejection)
+*.bin
+*.pth
+*.pt
+*.safetensors
+*.onnx
+*.pkl
+*.h5
+*.pb
+
+# Large media files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.wav
+*.mp3
+
 # Deployment artifacts (not needed in production)
 voiceforge-deploy.tar.gz
 attached_assets/
+uploads/

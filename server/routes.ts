@@ -465,12 +465,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         result = await pythonBridge.createProfessionalClone(cloneId, req.file.buffer, instantData.name);
       }
-      
+
+      // Validate result from Python worker
+      if (!result || typeof result !== 'object') {
+        console.error("[Voice Cloning] Invalid result from Python worker:", result);
+        return res.status(500).json({
+          error: "Voice cloning failed",
+          message: "Invalid response from voice cloning service"
+        });
+      }
+
       // Check for cloning failure
       if (result.status === "failed") {
         return res.status(400).json({
           error: "Voice cloning failed",
-          message: result.message
+          message: result.message || "Voice cloning process failed"
         });
       }
       
@@ -515,10 +524,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: clonedVoice.status,
         cloningMode: clonedVoice.cloningMode,
         processingStatus: clonedVoice.processingStatus,
-        trainingProgress: result.training_progress,
-        qualityScore: result.quality_score,
+        trainingProgress: result.training_progress || 0, // Default to 0 if not provided
+        qualityScore: result.quality_score || 0, // Default to 0 if not provided
         createdAt: clonedVoice.createdAt,
-        characteristics: clonedVoice.voiceCharacteristics,
+        characteristics: clonedVoice.voiceCharacteristics || {}, // Default to empty object if not provided
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {

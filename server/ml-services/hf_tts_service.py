@@ -36,20 +36,23 @@ class HFTTSService:
     def synthesize(self, text: str, model: str, voice_prompt: str) -> bytes:
         """
         Generate speech using HF Inference API
-        
+
         Args:
             text: Text to synthesize
-            model: Model to use ('indic_parler_tts' or 'parler_tts_multilingual')
+            model: Model to use ('indic_parler_tts'/'indic-parler-tts' or 'parler_tts_multilingual'/'parler-tts-multilingual')
             voice_prompt: Natural language description of voice
-        
+
         Returns:
             Audio bytes
         """
         try:
+            # Normalize model name: accept both hyphens and underscores
+            model_normalized = model.replace('-', '_')
+
             # Select model URL
-            if model == 'indic_parler_tts':
+            if model_normalized in ['indic_parler_tts']:
                 api_url = INDIC_PARLER_URL
-            elif model == 'parler_tts_multilingual':
+            elif model_normalized in ['parler_tts_multilingual']:
                 api_url = PARLER_MULTI_URL
             else:
                 raise ValueError(f"Unknown HF TTS model: {model}")
