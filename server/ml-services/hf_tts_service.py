@@ -46,10 +46,10 @@ class HFTTSService:
             Audio bytes
         """
         try:
-            # Select model URL
-            if model == 'indic_parler_tts':
+            # Select model URL (accept both hyphens and underscores)
+            if model in ['indic_parler_tts', 'indic-parler-tts']:
                 api_url = INDIC_PARLER_URL
-            elif model == 'parler_tts_multilingual':
+            elif model in ['parler_tts_multilingual', 'parler-tts-multilingual']:
                 api_url = PARLER_MULTI_URL
             else:
                 raise ValueError(f"Unknown HF TTS model: {model}")

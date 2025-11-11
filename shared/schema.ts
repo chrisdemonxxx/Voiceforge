@@ -182,7 +182,7 @@ export const ttsRequestSchema = z.object({
   text: z.string().min(1).max(5000),
   model: TTSModel,
   voice: z.string().optional(),
-  format: AudioFormat.default("wav"),
+  format: AudioFormat.optional().default("wav"),
   speed: z.number().min(0.5).max(2.0).default(1.0),
 });
 
@@ -191,7 +191,7 @@ export type TTSRequest = z.infer<typeof ttsRequestSchema>;
 // STT Request schema
 export const sttRequestSchema = z.object({
   language: z.string().default("en"),
-  format: AudioFormat,
+  format: AudioFormat.optional().default("wav"),
 });
 
 export type STTRequest = z.infer<typeof sttRequestSchema>;

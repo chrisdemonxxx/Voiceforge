@@ -413,7 +413,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           syntheticData.voiceDescription || "",
           characteristics
         );
-        
+
+        // Validate result from Python worker
+        if (!result || typeof result !== 'object') {
+          console.error("[Voice Cloning] Invalid result from Python worker:", result);
+          return res.status(500).json({
+            error: "Voice cloning failed",
+            message: "Invalid response from voice cloning service"
+          });
+        }
+
         // Save to database
         const clonedVoice = await storage.createClonedVoice({
           apiKeyId: apiKey.id,
@@ -424,20 +433,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           processingStatus: "completed",
           voiceDescription: syntheticData.voiceDescription,
           referenceAudioPath: null,
-          voiceCharacteristics: result.characteristics,
-          status: result.status,
+          voiceCharacteristics: result.characteristics || {},
+          status: result.status || "processing",
         });
-        
+
         return res.json({
           id: clonedVoice.id,
           name: clonedVoice.name,
           model: clonedVoice.model,
-          status: clonedVoice.status,
+          status: clonedVoice.status || "processing",
           cloningMode: clonedVoice.cloningMode,
-          processingStatus: clonedVoice.processingStatus,
-          qualityScore: result.quality_score,
+          processingStatus: clonedVoice.processingStatus || "pending",
+          qualityScore: result.quality_score || 0,
           createdAt: clonedVoice.createdAt,
-          characteristics: clonedVoice.voiceCharacteristics,
+          characteristics: clonedVoice.voiceCharacteristics || {},
         });
       }
       
@@ -465,7 +474,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         result = await pythonBridge.createProfessionalClone(cloneId, req.file.buffer, instantData.name);
       }
-      
+
+      // Validate result from Python worker
+      if (!result || typeof result !== 'object') {
+        console.error("[Voice Cloning] Invalid result from Python worker:", result);
+        return res.status(500).json({
+          error: "Voice cloning failed",
+          message: "Invalid response from voice cloning service"
+        });
+      }
+
       // Check for cloning failure
       if (result.status === "failed") {
         return res.status(400).json({
@@ -483,8 +501,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cloningMode: data.cloningMode,
         processingStatus: result.status === "ready" ? "completed" : "pending",
         referenceAudioPath: `uploads/voices/${audioFileName}`,
-        voiceCharacteristics: result.characteristics,
-        status: result.status,
+        voiceCharacteristics: result.characteristics || {},
+        status: result.status || "processing",
       });
       
       // If professional mode and still processing, poll for status
@@ -512,13 +530,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         id: clonedVoice.id,
         name: clonedVoice.name,
         model: clonedVoice.model,
-        status: clonedVoice.status,
+        status: clonedVoice.status || "processing",
         cloningMode: clonedVoice.cloningMode,
-        processingStatus: clonedVoice.processingStatus,
-        trainingProgress: result.training_progress,
-        qualityScore: result.quality_score,
+        processingStatus: clonedVoice.processingStatus || "pending",
+        trainingProgress: result.training_progress || 0,
+        qualityScore: result.quality_score || 0,
         createdAt: clonedVoice.createdAt,
-        characteristics: clonedVoice.voiceCharacteristics,
+        characteristics: clonedVoice.voiceCharacteristics || {},
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {

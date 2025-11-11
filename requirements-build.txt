@@ -8,8 +8,8 @@ setuptools-scm
 wheel
 packaging>=23.0
 
-# NumPy (required before vLLM - version constraint for numba compatibility)
-numpy>=1.22.0,<1.27.0
+# NumPy (Python 3.11 allows 1.24.3 - resolves TTS/librosa conflict)
+numpy==1.24.3
 
 # Build system
 ninja

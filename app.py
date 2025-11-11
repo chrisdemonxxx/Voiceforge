@@ -1,6 +1,6 @@
 """
 VoiceForge API - Hugging Face Spaces Entry Point
-Production deployment for 80GB A100 GPU (Python 3.10)
+Production deployment for 80GB A100 GPU (Python 3.11)
 
 This file serves as the main entry point for Hugging Face Spaces.
 It starts the Express server and exposes the API endpoints.
@@ -13,6 +13,9 @@ import signal
 import time
 from pathlib import Path
 
+# Dynamic path resolution - works in any environment (local, Docker, Gradio SDK)
+APP_DIR = Path(__file__).parent.absolute()
+
 # Set environment variables for production
 os.environ['NODE_ENV'] = 'production'
 os.environ['PORT'] = '7860'  # Hugging Face Spaces standard port
@@ -23,14 +26,15 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
 os.environ['OMP_NUM_THREADS'] = '8'
 
-# Model caching
-os.environ['HF_HOME'] = '/app/ml-cache'
-os.environ['TRANSFORMERS_CACHE'] = '/app/ml-cache'
-os.environ['TORCH_HOME'] = '/app/ml-cache'
+# Model caching - use dynamic paths
+os.environ['HF_HOME'] = str(APP_DIR / 'ml-cache')
+os.environ['TRANSFORMERS_CACHE'] = str(APP_DIR / 'ml-cache')
+os.environ['TORCH_HOME'] = str(APP_DIR / 'ml-cache')
 
 print("=" * 80)
 print("🚀 VoiceForge API - Starting Production Server")
 print("=" * 80)
+print(f"✓ Working Directory: {APP_DIR}")
 print(f"✓ Environment: {os.environ.get('NODE_ENV')}")
 print(f"✓ Port: {os.environ.get('PORT')}")
 print(f"✓ GPU: CUDA Device 0 (80GB A100)")
@@ -68,22 +72,60 @@ except ImportError as e:
 print("=" * 80)
 
 # Change to app directory
-os.chdir('/app')
+os.chdir(APP_DIR)
 
 # Create runtime directories
 print("\n📁 Creating runtime directories...")
-Path('/app/uploads').mkdir(parents=True, exist_ok=True)
-Path('/app/ml-cache').mkdir(parents=True, exist_ok=True)
-Path('/app/logs').mkdir(parents=True, exist_ok=True)
+(APP_DIR / 'uploads').mkdir(parents=True, exist_ok=True)
+(APP_DIR / 'ml-cache').mkdir(parents=True, exist_ok=True)
+(APP_DIR / 'logs').mkdir(parents=True, exist_ok=True)
 print("✓ Runtime directories created")
 
 # Skip npm ci in production (node_modules already in container)
-if not Path('/app/node_modules').exists():
+if not (APP_DIR / 'node_modules').exists():
     print("📦 node_modules not found - installing dependencies...")
     subprocess.run(['npm', 'ci'], check=True)
     print("✓ Node.js dependencies installed")
 else:
     print("✓ Node.js dependencies already available (production container)")
+
+# CRITICAL: Always rebuild to prevent stale dist/ cache on HF Spaces
+# Even if dist/ exists, force rebuild to ensure latest TypeScript changes apply
+print("\n⚙️  Building TypeScript...")
+print("=" * 80)
+try:
+    result = subprocess.run(
+        ['npm', 'run', 'build'],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=300
+    )
+    print(result.stdout)
+    print("✓ TypeScript build successful")
+except subprocess.CalledProcessError as e:
+    print(f"❌ Build failed: {e.stderr}")
+    sys.exit(1)
+except subprocess.TimeoutExpired:
+    print("❌ Build timed out")
+    sys.exit(1)
+
+# Copy Python ML services to dist/ (required for runtime)
+print("\n📂 Copying Python ML services to dist/...")
+import shutil
+ml_services_src = APP_DIR / 'server' / 'ml-services'
+ml_services_dist = APP_DIR / 'dist' / 'ml-services'
+
+if ml_services_src.exists():
+    if ml_services_dist.exists():
+        shutil.rmtree(ml_services_dist)
+    shutil.copytree(ml_services_src, ml_services_dist)
+    py_files = list(ml_services_src.glob('*.py'))
+    print(f"✓ Copied {len(py_files)} Python service files")
+else:
+    print("⚠️  Warning: ML services directory not found")
+
+print("=" * 80)
 
 # Initialize database tables (only if DATABASE_URL is available)
 database_url = os.environ.get('DATABASE_URL')
@@ -116,9 +158,9 @@ print("=" * 80)
 
 # Start server process
 print(f"Working directory: {os.getcwd()}")
-print(f"node_modules exists: {Path('/app/node_modules').exists()}")
-print(f"dist exists: {Path('/app/dist').exists()}")
-print(f"dist/index.js exists: {Path('/app/dist/index.js').exists()}")
+print(f"node_modules exists: {(APP_DIR / 'node_modules').exists()}")
+print(f"dist exists: {(APP_DIR / 'dist').exists()}")
+print(f"dist/index.js exists: {(APP_DIR / 'dist' / 'index.js').exists()}")
 print("=" * 80)
 
 try:

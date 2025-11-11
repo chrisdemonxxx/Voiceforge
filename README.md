@@ -3,8 +3,10 @@ title: VoiceForge API
 emoji: 🎙️
 colorFrom: purple
 colorTo: blue
-sdk: docker
+sdk: gradio
+python_version: 3.11
 app_port: 7860
+app_file: app.py
 pinned: false
 license: mit
 short_description: GPU-Accelerated Voice AI Platform - TTS, STT, VAD, VLLM
