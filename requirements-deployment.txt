@@ -9,13 +9,13 @@
 # transformers/accelerate/optimum versions coupled - parler-tts requires transformers==4.46.1
 transformers==4.46.1
 accelerate==0.27.2
-optimum==1.18.0
+optimum==1.23.3
 
 # ============================================================================
 # Text-to-Speech (TTS) Models
 # ============================================================================
 parler-tts==0.2.3
-TTS==0.22.0
+TTS==0.24.0
 
 # ============================================================================
 # Speech-to-Text (STT)
@@ -48,8 +48,10 @@ speechbrain==0.5.16
 # ============================================================================
 # Audio Processing
 # ============================================================================
-# NOTE: numpy and numba are pre-installed in requirements-build.txt
-librosa==0.10.1
+# NOTE: numpy pinned to 1.24.3 for compatibility with TTS 0.24.0 and librosa 0.10.2
+# numba is pre-installed in requirements-build.txt
+numpy==1.24.3
+librosa==0.10.2
 soundfile==0.12.1
 pydub==0.25.1
 audioread==3.0.1
