@@ -411,4 +411,7 @@ export class DbStorage implements IStorage {
   }
 }
 
-export const storage = new DbStorage();
+import { MockStorage } from "./mock-storage";
+
+// Use MockStorage in development mode when DATABASE_URL is not set
+export const storage: IStorage = db ? new DbStorage() : new MockStorage();
