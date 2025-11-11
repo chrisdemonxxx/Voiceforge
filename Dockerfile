@@ -1,5 +1,5 @@
 # VoiceForge API - HF Spaces Optimized Dockerfile
-# Production deployment for GPU acceleration (Python 3.10, Node.js 20)
+# Production deployment for GPU acceleration (Python 3.11, Node.js 20)
 
 # ============================================================================
 # Stage 1: Node.js Build (Frontend + Backend TypeScript)
@@ -30,11 +30,15 @@ RUN npm run build
 # ============================================================================
 FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 AS python-base
 
-# Install system dependencies
+# Install system dependencies and Python 3.11
 RUN apt-get update && apt-get install -y \
-    python3 \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3.11-distutils \
     python3-pip \
-    python3-dev \
     git \
     curl \
     ffmpeg \
@@ -48,6 +52,7 @@ RUN apt-get update && apt-get install -y \
     libswresample-dev \
     libavfilter-dev \
     build-essential \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create user with UID 1000
@@ -75,21 +80,25 @@ RUN pip3 install --no-cache-dir --user -r requirements-deployment.txt
 # ============================================================================
 FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
 
-# Install runtime dependencies including Node.js 20
+# Install runtime dependencies including Node.js 20 and Python 3.11
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
     gnupg \
+    software-properties-common \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update \
     && apt-get install -y \
     nodejs \
-    python3 \
+    python3.11 \
+    python3.11-distutils \
     python3-pip \
     ffmpeg \
     libsndfile1 \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create user with UID 1000 and set up directories

@@ -15,7 +15,7 @@ optimum==1.23.3
 # Text-to-Speech (TTS) Models
 # ============================================================================
 parler-tts==0.2.3
-TTS==0.24.0
+TTS==0.22.0
 
 # ============================================================================
 # Speech-to-Text (STT)
@@ -48,9 +48,8 @@ speechbrain==0.5.16
 # ============================================================================
 # Audio Processing
 # ============================================================================
-# NOTE: numpy pinned to 1.24.3 for compatibility with TTS 0.24.0 and librosa 0.10.2
-# numba is pre-installed in requirements-build.txt
-numpy==1.24.3
+# NOTE: numpy installed from requirements-build.txt (compatible with Python 3.11)
+# TTS 0.22.0 numpy==1.22.0 constraint only applies to Python <= 3.10
 librosa==0.10.2
 soundfile==0.12.1
 pydub==0.25.1
