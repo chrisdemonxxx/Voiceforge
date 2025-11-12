@@ -15,14 +15,11 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install Node.js dependencies (including dev dependencies for build)
+# Install Node.js dependencies
 RUN npm ci
 
 # Copy application code
 COPY . .
-
-# Build the application
-RUN npm run build
 
 # Expose port
 EXPOSE 5000
@@ -31,5 +28,5 @@ EXPOSE 5000
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Start the server
-CMD ["npm", "start"]
+# Start the server directly with tsx (no build needed)
+CMD ["npx", "tsx", "server/index.ts"]
