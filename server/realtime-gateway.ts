@@ -7,7 +7,7 @@ import type {
   RealTimeSession 
 } from "@shared/schema";
 import { wsClientMessageSchema } from "@shared/schema";
-import { pythonBridge } from "./python-bridge";
+import { mlClient } from "./ml-client";
 import { storage } from "./storage";
 
 // Real-time session management
@@ -252,7 +252,7 @@ export class RealTimeGateway {
     
     try {
       // Process audio chunk through worker pool
-      const sttResult = await pythonBridge.processSTTChunk({
+      const sttResult = await mlClient.processSTTChunk({
         chunk: message.chunk,
         sequence: conn.messageCount,
         language: "en",
@@ -328,7 +328,7 @@ export class RealTimeGateway {
       
       try {
         // Call VLLM agent with the transcription
-        const vllmResult = await pythonBridge.callVLLM({
+        const vllmResult = await mlClient.callVLLM({
           session_id: conn.sessionId,
           message: transcription,
           mode: conn.config?.agentMode || "assistant",
@@ -367,7 +367,7 @@ export class RealTimeGateway {
     
     if (conn.config?.ttsEnabled && agentResponse) {
       try {
-        await pythonBridge.callTTSStreaming(
+        await mlClient.callTTSStreaming(
           {
             text: agentResponse,
             model: conn.config?.model || "chatterbox",
@@ -572,7 +572,7 @@ export class RealTimeGateway {
       
       try {
         // Call VLLM agent with the text input
-        const vllmResult = await pythonBridge.callVLLM({
+        const vllmResult = await mlClient.callVLLM({
           session_id: conn.sessionId,
           message: message.text,
           mode: conn.config?.agentMode || "assistant",
@@ -620,7 +620,7 @@ export class RealTimeGateway {
     
     if (conn.config?.ttsEnabled && agentResponse) {
       try {
-        await pythonBridge.callTTSStreaming(
+        await mlClient.callTTSStreaming(
           {
             text: agentResponse,
             model: conn.config?.model || "chatterbox",
