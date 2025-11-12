@@ -1,6 +1,10 @@
 import type { TelephonyProvider, Call, InsertCall } from "@shared/schema";
 import { storage } from "../storage";
 import type { PythonBridge } from "../python-bridge";
+import type { HFSpacesClient } from "../hf-spaces-client";
+
+// ML Client type can be either PythonBridge or HFSpacesClient
+type MLClient = PythonBridge | HFSpacesClient;
 import { ProviderFactory } from "./telephony-providers/provider-factory";
 
 export interface CallSession {
@@ -36,9 +40,9 @@ export interface TelephonyConfig {
  */
 export class TelephonyService {
   private activeSessions = new Map<string, CallSession>();
-  private pythonBridge: PythonBridge;
+  private pythonBridge: MLClient;
 
-  constructor(pythonBridge: PythonBridge) {
+  constructor(pythonBridge: MLClient) {
     this.pythonBridge = pythonBridge;
   }
 

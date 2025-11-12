@@ -4,7 +4,7 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { rateLimiter } from "./rate-limiter";
-import { pythonBridge } from "./python-bridge";
+import { mlClient } from "./ml-client";
 import { RealTimeGateway } from "./realtime-gateway";
 import { TelephonySignaling } from "./telephony-signaling";
 import { TelephonyService } from "./services/telephony-service";
@@ -44,20 +44,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.error("[Server] Failed to initialize database:", error);
   }
   
-  // Initialize Python worker pools
-  console.log("[Server] Initializing Python worker pools...");
+  // Initialize ML client (Python worker pools or HF Spaces API)
+  console.log("[Server] Initializing ML client...");
   try {
-    await pythonBridge.initialize();
-    console.log("[Server] Python worker pools initialized successfully");
+    await mlClient.initialize();
+    console.log("[Server] ML client initialized successfully");
   } catch (error) {
-    console.error("[Server] Failed to initialize Python worker pools:", error);
-    console.log("[Server] Continuing without worker pools (will use fallback spawn mode)");
+    console.error("[Server] Failed to initialize ML client:", error);
+    console.log("[Server] Continuing without ML client (may have reduced functionality)");
   }
   
   // Setup graceful shutdown
   const shutdown = async () => {
     console.log("\n[Server] Shutting down...");
-    await pythonBridge.shutdown();
+    await mlClient.shutdown();
     process.exit(0);
   };
   
@@ -282,7 +282,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Call Python TTS service
-      const audioBuffer = await pythonBridge.callTTS({
+      const audioBuffer = await mlClient.callTTS({
         text: data.text,
         model: data.model,
         voice: voiceData.voice,
@@ -408,7 +408,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
         
         // Create synthetic clone via worker pool
-        const result = await pythonBridge.createSyntheticClone(
+        const result = await mlClient.createSyntheticClone(
           cloneId,
           syntheticData.voiceDescription || "",
           characteristics
@@ -461,9 +461,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create clone via worker pool
       let result;
       if (data.cloningMode === "instant") {
-        result = await pythonBridge.createInstantClone(cloneId, req.file.buffer, instantData.name);
+        result = await mlClient.createInstantClone(cloneId, req.file.buffer, instantData.name);
       } else {
-        result = await pythonBridge.createProfessionalClone(cloneId, req.file.buffer, instantData.name);
+        result = await mlClient.createProfessionalClone(cloneId, req.file.buffer, instantData.name);
       }
       
       // Check for cloning failure
@@ -492,7 +492,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Background polling to update status
         const pollInterval = setInterval(async () => {
           try {
-            const status = await pythonBridge.getCloneStatus(cloneId);
+            const status = await mlClient.getCloneStatus(cloneId);
             if (status.status === "ready" || status.status === "failed") {
               await storage.updateClonedVoiceStatus(clonedVoice.id, status.status);
               console.log(`[Professional Clone] Voice ${clonedVoice.id} ${status.status}`);
@@ -635,7 +635,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const realTimeGateway = new RealTimeGateway(httpServer, "/ws/realtime");
   
   // Telephony Service and Signaling for WebRTC Calls
-  const telephonyService = new TelephonyService(pythonBridge);
+  const telephonyService = new TelephonyService(mlClient);
   const telephonySignaling = new TelephonySignaling(httpServer, telephonyService, "/ws/telephony");
   
   // Metrics endpoint for real-time gateway
