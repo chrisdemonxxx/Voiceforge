@@ -23,12 +23,11 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
 os.environ['OMP_NUM_THREADS'] = '8'
 
-# Model caching - Use both /app/ml-cache and /app/.cache for compatibility
-os.environ['HF_HOME'] = '/app/.cache'
-os.environ['TRANSFORMERS_CACHE'] = '/app/.cache'
-os.environ['TORCH_HOME'] = '/app/.cache'
-os.environ['HF_DATASETS_CACHE'] = '/app/.cache/datasets'
-os.environ['HUGGINGFACE_HUB_CACHE'] = '/app/.cache/hub'
+# Model caching (use HOME/app/ml-cache for proper permissions)
+cache_dir = os.path.join(os.environ.get('HOME', '/home/user'), 'app', 'ml-cache')
+os.environ['HF_HOME'] = cache_dir
+os.environ['TRANSFORMERS_CACHE'] = cache_dir
+os.environ['TORCH_HOME'] = cache_dir
 
 print("=" * 80)
 print("🚀 VoiceForge API - Starting Production Server")
@@ -69,29 +68,21 @@ except ImportError as e:
 
 print("=" * 80)
 
-# Change to app directory
-os.chdir('/app')
+# Get app directory from environment or use default
+app_dir = os.environ.get('HOME', '/home/user') + '/app'
+os.chdir(app_dir)
 
-# Create runtime directories with proper permissions
+# Create runtime directories
 print("\n📁 Creating runtime directories...")
-Path('/app/uploads').mkdir(parents=True, exist_ok=True)
-Path('/app/ml-cache').mkdir(parents=True, exist_ok=True)
-Path('/app/.cache').mkdir(parents=True, exist_ok=True)
-Path('/app/logs').mkdir(parents=True, exist_ok=True)
+Path(f'{app_dir}/uploads').mkdir(parents=True, exist_ok=True)
+Path(f'{app_dir}/ml-cache').mkdir(parents=True, exist_ok=True)
+Path(f'{app_dir}/logs').mkdir(parents=True, exist_ok=True)
+print("✓ Runtime directories created")
 
-# Set permissions to ensure models can be cached
-try:
-    os.chmod('/app/ml-cache', 0o777)
-    os.chmod('/app/.cache', 0o777)
-    print("✓ Runtime directories created with proper permissions")
-except Exception as e:
-    print(f"⚠️  Warning: Could not set directory permissions: {e}")
-    print("   Continuing anyway...")
-
-# Skip npm ci in production (node_modules already in container)
-if not Path('/app/node_modules').exists():
+# Skip npm install in production (node_modules already in container)
+if not Path(f'{app_dir}/node_modules').exists():
     print("📦 node_modules not found - installing dependencies...")
-    subprocess.run(['npm', 'ci'], check=True)
+    subprocess.run(['npm', 'install'], check=True, cwd=app_dir)
     print("✓ Node.js dependencies installed")
 else:
     print("✓ Node.js dependencies already available (production container)")
@@ -107,7 +98,8 @@ if database_url:
             check=True,
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
+            cwd=app_dir
         )
         print("✓ Database tables created/updated successfully")
     except subprocess.CalledProcessError as e:
@@ -127,9 +119,9 @@ print("=" * 80)
 
 # Start server process
 print(f"Working directory: {os.getcwd()}")
-print(f"node_modules exists: {Path('/app/node_modules').exists()}")
-print(f"dist exists: {Path('/app/dist').exists()}")
-print(f"dist/index.js exists: {Path('/app/dist/index.js').exists()}")
+print(f"node_modules exists: {Path(f'{app_dir}/node_modules').exists()}")
+print(f"dist exists: {Path(f'{app_dir}/dist').exists()}")
+print(f"dist/index.js exists: {Path(f'{app_dir}/dist/index.js').exists()}")
 print("=" * 80)
 
 try:
@@ -138,7 +130,8 @@ try:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        bufsize=1
+        bufsize=1,
+        cwd=app_dir
     )
 except Exception as e:
     print(f"❌ Failed to start server: {e}")
@@ -149,6 +142,7 @@ except Exception as e:
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        cwd=app_dir,
         env={**os.environ, 'NODE_ENV': 'production', 'PORT': '7860'}
     )
 
