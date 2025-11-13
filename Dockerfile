@@ -17,7 +17,7 @@ WORKDIR $HOME/app
 COPY --chown=node package*.json ./
 
 # Install dependencies
-RUN npm ci
+RUN npm install
 
 # Copy source code
 COPY --chown=node . .
