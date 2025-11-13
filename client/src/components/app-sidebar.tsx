@@ -63,6 +63,11 @@ const menuItems = [
         url: "/voice-design",
         icon: Wand2,
       },
+      {
+        title: "TTS Playground",
+        url: "/tts-playground",
+        icon: Play,
+      },
     ],
   },
   {

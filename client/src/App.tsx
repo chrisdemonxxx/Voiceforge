@@ -11,6 +11,7 @@ import RealTimeLab from "@/pages/realtime-lab";
 import VoiceLibrary from "@/pages/voice-library";
 import CloneVoice from "@/pages/clone-voice";
 import VoiceDesign from "@/pages/voice-design";
+import TTSPlayground from "@/pages/tts-playground";
 import AgentFlows from "@/pages/agent-flows";
 import AgentFlowsCreate from "@/pages/agent-flows-create";
 import AgentFlowsAIBuilder from "@/pages/agent-flows-ai-builder";
@@ -66,6 +67,7 @@ function Router() {
         <Route path="/voice-library" component={VoiceLibrary} />
         <Route path="/clone-voice" component={CloneVoice} />
         <Route path="/voice-design" component={VoiceDesign} />
+        <Route path="/tts-playground" component={TTSPlayground} />
         <Route path="/agent-flows" component={AgentFlows} />
         <Route path="/agent-flows/create" component={AgentFlowsCreate} />
         <Route path="/agent-flows/ai-builder" component={AgentFlowsAIBuilder} />
