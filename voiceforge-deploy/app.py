@@ -23,10 +23,19 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
 os.environ['OMP_NUM_THREADS'] = '8'
 
-# Model caching
-os.environ['HF_HOME'] = '/app/ml-cache'
-os.environ['TRANSFORMERS_CACHE'] = '/app/ml-cache'
-os.environ['TORCH_HOME'] = '/app/ml-cache'
+# Model caching - Use /app/.cache for compatibility with HF Spaces
+os.environ['HF_HOME'] = '/app/.cache'
+os.environ['TRANSFORMERS_CACHE'] = '/app/.cache'
+os.environ['TORCH_HOME'] = '/app/.cache'
+os.environ['HF_DATASETS_CACHE'] = '/app/.cache/datasets'
+os.environ['HUGGINGFACE_HUB_CACHE'] = '/app/.cache/hub'
+
+# Create cache directory early with proper permissions
+Path('/app/.cache').mkdir(parents=True, exist_ok=True)
+try:
+    os.chmod('/app/.cache', 0o777)
+except Exception:
+    pass  # Continue even if chmod fails
 
 print("=" * 80)
 print("🚀 VoiceForge API - Starting Production Server")

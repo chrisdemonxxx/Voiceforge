@@ -23,10 +23,12 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
 os.environ['OMP_NUM_THREADS'] = '8'
 
-# Model caching
-os.environ['HF_HOME'] = '/app/ml-cache'
-os.environ['TRANSFORMERS_CACHE'] = '/app/ml-cache'
-os.environ['TORCH_HOME'] = '/app/ml-cache'
+# Model caching - Use /app/.cache for compatibility with HF Spaces
+os.environ['HF_HOME'] = '/app/.cache'
+os.environ['TRANSFORMERS_CACHE'] = '/app/.cache'
+os.environ['TORCH_HOME'] = '/app/.cache'
+os.environ['HF_DATASETS_CACHE'] = '/app/.cache/datasets'
+os.environ['HUGGINGFACE_HUB_CACHE'] = '/app/.cache/hub'
 
 print("=" * 80)
 print("🚀 VoiceForge API - Starting Production Server")
@@ -70,12 +72,21 @@ print("=" * 80)
 # Change to app directory
 os.chdir('/app')
 
-# Create runtime directories
+# Create runtime directories with proper permissions
 print("\n📁 Creating runtime directories...")
 Path('/app/uploads').mkdir(parents=True, exist_ok=True)
 Path('/app/ml-cache').mkdir(parents=True, exist_ok=True)
+Path('/app/.cache').mkdir(parents=True, exist_ok=True)
 Path('/app/logs').mkdir(parents=True, exist_ok=True)
-print("✓ Runtime directories created")
+
+# Set permissions to ensure models can be cached
+try:
+    os.chmod('/app/ml-cache', 0o777)
+    os.chmod('/app/.cache', 0o777)
+    print("✓ Runtime directories created with proper permissions")
+except Exception as e:
+    print(f"⚠️  Warning: Could not set directory permissions: {e}")
+    print("   Continuing anyway...")
 
 # Skip npm ci in production (node_modules already in container)
 if not Path('/app/node_modules').exists():

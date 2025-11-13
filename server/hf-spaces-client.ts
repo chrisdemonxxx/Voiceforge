@@ -67,7 +67,7 @@ export class HFSpacesClient {
     console.log("[HFSpacesClient] Testing connection to HF Spaces ML API...");
 
     try {
-      const response = await fetch(`${this.apiUrl}/health`, {
+      const response = await fetch(`${this.apiUrl}/api/health`, {
         method: "GET",
         signal: AbortSignal.timeout(5000)
       });
@@ -76,7 +76,9 @@ export class HFSpacesClient {
         throw new Error(`Health check failed: ${response.status}`);
       }
 
+      const data = await response.json();
       console.log("[HFSpacesClient] Successfully connected to HF Spaces ML API");
+      console.log("[HFSpacesClient] Model status:", data.models);
     } catch (error) {
       console.error("[HFSpacesClient] Failed to connect to HF Spaces ML API:", error);
       console.warn("[HFSpacesClient] Continuing anyway - API may become available later");
@@ -87,12 +89,19 @@ export class HFSpacesClient {
     console.log(`[HFSpacesClient] TTS request: model=${request.model}, text length=${request.text?.length || 0}`);
 
     try {
+      // HF Spaces API expects simplified request format
+      const apiRequest = {
+        text: request.text,
+        voice: request.voice || "default",
+        speed: request.speed || 1.0
+      };
+
       const response = await fetch(`${this.apiUrl}/api/tts`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(apiRequest),
         signal: AbortSignal.timeout(this.timeout)
       });
 
@@ -101,69 +110,113 @@ export class HFSpacesClient {
         throw new Error(`TTS API error (${response.status}): ${errorText}`);
       }
 
+      // HF Spaces API returns JSON with audio_base64 field
       const data = await response.json();
 
-      if (!data.audio) {
-        throw new Error("No audio data in TTS response");
+      if (!data.audio_base64) {
+        throw new Error("No audio_base64 data in TTS response");
       }
 
       // Decode base64 audio to buffer
-      const audioBuffer = Buffer.from(data.audio, "base64");
-      console.log(`[HFSpacesClient] TTS success: generated ${audioBuffer.length} bytes`);
-
+      const audioBuffer = Buffer.from(data.audio_base64, "base64");
+      console.log(`[HFSpacesClient] TTS success: generated ${audioBuffer.length} bytes, duration: ${data.duration}s`);
       return audioBuffer;
     } catch (error) {
       console.error("[HFSpacesClient] TTS error:", error);
+      
+      // Check for specific error types
+      if (error instanceof Error) {
+        if (error.message.includes("timeout") || error.message.includes("AbortError")) {
+          throw new Error(`TTS timeout after ${this.timeout}ms`);
+        }
+        if (error.message.includes("503") || error.message.includes("Service Unavailable")) {
+          throw new Error("TTS service temporarily unavailable (503)");
+        }
+        if (error.message.includes("504") || error.message.includes("Gateway Timeout")) {
+          throw new Error("TTS service timeout (504)");
+        }
+      }
+      
       throw new Error(`TTS failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   async processSTTChunk(request: STTChunkRequest): Promise<STTChunkResponse> {
     try {
+      // HF Spaces API expects simplified request format
+      const apiRequest = {
+        audio_base64: request.chunk,
+        language: request.language || "auto"
+      };
+
       const response = await fetch(`${this.apiUrl}/api/stt`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(apiRequest),
         signal: AbortSignal.timeout(this.timeout)
       });
 
       if (!response.ok) {
         const errorText = await response.text();
+
+        // Handle specific error codes
+        if (response.status === 503) {
+          throw new Error("STT service temporarily unavailable (503)");
+        }
+        if (response.status === 504) {
+          throw new Error("STT service timeout (504)");
+        }
+
         throw new Error(`STT API error (${response.status}): ${errorText}`);
       }
 
       const data = await response.json();
-      return data as STTChunkResponse;
+
+      // Map HF Spaces API response to expected format
+      return {
+        text: data.text || "",
+        language: data.language || "en",
+        confidence: data.confidence || 0,
+        duration: data.duration || 0,
+        segments: data.segments || [],
+        is_partial: request.return_partial || false,
+        vad_active: true,
+        sequence: request.sequence,
+        processing_time: 0
+      } as STTChunkResponse;
     } catch (error) {
       console.error("[HFSpacesClient] STT error:", error);
+      
+      // Check for specific error types
+      if (error instanceof Error) {
+        if (error.message.includes("timeout") || error.message.includes("AbortError")) {
+          throw new Error(`STT timeout after ${this.timeout}ms`);
+        }
+        if (error.message.includes("503") || error.message.includes("Service Unavailable")) {
+          throw new Error("STT service temporarily unavailable (503)");
+        }
+        if (error.message.includes("504") || error.message.includes("Gateway Timeout")) {
+          throw new Error("STT service timeout (504)");
+        }
+      }
+      
       throw new Error(`STT failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   async callVLLM(request: VLLMRequest): Promise<VLLMResponse> {
     try {
-      const response = await fetch(`${this.apiUrl}/api/vllm`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(request),
-        signal: AbortSignal.timeout(this.timeout)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`VLLM API error (${response.status}): ${errorText}`);
-      }
-
-      const data = await response.json();
-      return data as VLLMResponse;
+      // HF Spaces API expects audio input for VLLM chat
+      // Since we only have text message, we'll use fallback
+      console.warn("[HFSpacesClient] VLLM requires audio input in HF Spaces API, using fallback");
+      throw new Error("VLLM requires audio input in HF Spaces API");
     } catch (error) {
       console.error("[HFSpacesClient] VLLM error:", error);
 
-      // Fallback response
+      // Fallback response for unavailable service or errors
+      console.log("[HFSpacesClient] Using fallback VLLM response");
       return {
         response: `I received your message: "${request.message}". How can I help you?`,
         session_id: request.session_id,
@@ -175,151 +228,98 @@ export class HFSpacesClient {
     }
   }
 
+  // NOTE: Voice cloning and analysis endpoints are not available in the current HF Spaces deployment
+  // These methods will throw errors if called
+
   async analyzeVoice(audioBuffer: Buffer): Promise<any> {
-    try {
-      const response = await fetch(`${this.apiUrl}/api/voice/analyze`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          audio: audioBuffer.toString("base64")
-        }),
-        signal: AbortSignal.timeout(this.timeout)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Voice analysis API error (${response.status}): ${errorText}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error("[HFSpacesClient] Voice analysis error:", error);
-      throw error;
-    }
+    console.error("[HFSpacesClient] Voice analysis not available in HF Spaces deployment");
+    throw new Error("Voice analysis endpoint not available in HF Spaces deployment");
   }
 
   async createInstantClone(cloneId: string, audioData: Buffer, name: string): Promise<any> {
-    try {
-      const response = await fetch(`${this.apiUrl}/api/voice/clone/instant`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          clone_id: cloneId,
-          audio: audioData.toString("base64"),
-          name: name
-        }),
-        signal: AbortSignal.timeout(this.timeout)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Instant clone API error (${response.status}): ${errorText}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error("[HFSpacesClient] Instant clone error:", error);
-      throw error;
-    }
+    console.error("[HFSpacesClient] Instant clone not available in HF Spaces deployment");
+    throw new Error("Instant clone endpoint not available in HF Spaces deployment");
   }
 
   async createProfessionalClone(cloneId: string, audioData: Buffer, name: string): Promise<any> {
-    try {
-      const response = await fetch(`${this.apiUrl}/api/voice/clone/professional`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          clone_id: cloneId,
-          audio: audioData.toString("base64"),
-          name: name
-        }),
-        signal: AbortSignal.timeout(this.timeout)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Professional clone API error (${response.status}): ${errorText}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error("[HFSpacesClient] Professional clone error:", error);
-      throw error;
-    }
+    console.error("[HFSpacesClient] Professional clone not available in HF Spaces deployment");
+    throw new Error("Professional clone endpoint not available in HF Spaces deployment");
   }
 
   async createSyntheticClone(cloneId: string, description: string, characteristics: any): Promise<any> {
+    console.error("[HFSpacesClient] Synthetic clone not available in HF Spaces deployment");
+    throw new Error("Synthetic clone endpoint not available in HF Spaces deployment");
+  }
+
+  async getCloneStatus(cloneId: string): Promise<any> {
+    console.error("[HFSpacesClient] Clone status not available in HF Spaces deployment");
+    throw new Error("Clone status endpoint not available in HF Spaces deployment");
+  }
+
+  async getMetrics() {
+    console.warn("[HFSpacesClient] Metrics endpoint not available in HF Spaces deployment");
+    return {
+      stt: null,
+      tts: null,
+      vllm: null,
+      clone: null
+    };
+  }
+
+  async processVAD(audioBuffer: Buffer): Promise<{ segments: Array<{ start: number; end: number; confidence: number }> }> {
     try {
-      const response = await fetch(`${this.apiUrl}/api/voice/clone/synthetic`, {
+      // HF Spaces API expects audio_base64 field
+      const response = await fetch(`${this.apiUrl}/api/vad`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          clone_id: cloneId,
-          description: description,
-          characteristics: characteristics
+          audio_base64: audioBuffer.toString("base64"),
+          threshold: 0.5
         }),
         signal: AbortSignal.timeout(this.timeout)
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Synthetic clone API error (${response.status}): ${errorText}`);
+
+        // Handle specific error codes
+        if (response.status === 503) {
+          throw new Error("VAD service temporarily unavailable (503)");
+        }
+        if (response.status === 504) {
+          throw new Error("VAD service timeout (504)");
+        }
+        if (response.status === 404) {
+          throw new Error("VAD endpoint not found (404) - service may not be available");
+        }
+
+        throw new Error(`VAD API error (${response.status}): ${errorText}`);
       }
 
-      return await response.json();
+      const data = await response.json();
+      return { segments: data.segments || [] };
     } catch (error) {
-      console.error("[HFSpacesClient] Synthetic clone error:", error);
-      throw error;
-    }
-  }
-
-  async getCloneStatus(cloneId: string): Promise<any> {
-    try {
-      const response = await fetch(`${this.apiUrl}/api/voice/clone/${cloneId}/status`, {
-        method: "GET",
-        signal: AbortSignal.timeout(this.timeout)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Clone status API error (${response.status}): ${errorText}`);
+      console.error("[HFSpacesClient] VAD error:", error);
+      
+      // Check for specific error types
+      if (error instanceof Error) {
+        if (error.message.includes("timeout") || error.message.includes("AbortError")) {
+          throw new Error(`VAD timeout after ${this.timeout}ms`);
+        }
+        if (error.message.includes("503") || error.message.includes("Service Unavailable")) {
+          throw new Error("VAD service temporarily unavailable (503)");
+        }
+        if (error.message.includes("504") || error.message.includes("Gateway Timeout")) {
+          throw new Error("VAD service timeout (504)");
+        }
+        if (error.message.includes("404") || error.message.includes("not found")) {
+          throw new Error("VAD endpoint not available - service may not be implemented");
+        }
       }
-
-      return await response.json();
-    } catch (error) {
-      console.error("[HFSpacesClient] Clone status error:", error);
-      throw error;
-    }
-  }
-
-  async getMetrics() {
-    try {
-      const response = await fetch(`${this.apiUrl}/api/metrics`, {
-        method: "GET",
-        signal: AbortSignal.timeout(5000)
-      });
-
-      if (!response.ok) {
-        throw new Error(`Metrics API error (${response.status})`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error("[HFSpacesClient] Metrics error:", error);
-      return {
-        stt: null,
-        tts: null,
-        vllm: null,
-        clone: null
-      };
+      
+      throw new Error(`VAD failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
