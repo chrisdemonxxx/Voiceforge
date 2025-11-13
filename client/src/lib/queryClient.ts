@@ -18,16 +18,50 @@ const getApiBaseUrl = () => {
   return "";
 };
 
+// Get active API key from localStorage or fetch from API
+async function getActiveApiKey(): Promise<string | null> {
+  try {
+    // Try to get from API keys endpoint
+    const apiBase = getApiBaseUrl();
+    const response = await fetch(`${apiBase}/api/keys`);
+    if (response.ok) {
+      const keys = await response.json();
+      const activeKey = keys.find((k: any) => k.active);
+      if (activeKey) {
+        return activeKey.key;
+      }
+    }
+  } catch (error) {
+    console.warn("[queryClient] Failed to fetch API keys:", error);
+  }
+  return null;
+}
+
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
+  includeAuth: boolean = true,
 ): Promise<Response> {
   const apiBase = getApiBaseUrl();
   const fullUrl = url.startsWith("http") ? url : apiBase + url;
+  
+  const headers: Record<string, string> = {};
+  if (data) {
+    headers["Content-Type"] = "application/json";
+  }
+  
+  // Add Authorization header if needed
+  if (includeAuth) {
+    const apiKey = await getActiveApiKey();
+    if (apiKey) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+    }
+  }
+  
   const res = await fetch(fullUrl, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
@@ -39,13 +73,26 @@ export async function apiRequest(
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
+  requireAuth?: boolean;
 }) => QueryFunction<T> =
-  ({ on401: unauthorizedBehavior }) =>
+  ({ on401: unauthorizedBehavior, requireAuth = false }) =>
   async ({ queryKey }) => {
     const apiBase = getApiBaseUrl();
     const url = apiBase + queryKey.join("/");
+    
+    const headers: Record<string, string> = {};
+    
+    // Add Authorization header if required
+    if (requireAuth) {
+      const apiKey = await getActiveApiKey();
+      if (apiKey) {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+      }
+    }
+    
     const res = await fetch(url, {
       credentials: "include",
+      headers,
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
