@@ -63,7 +63,8 @@ router.get('/health', async (req, res) => {
     // Check database connection
     try {
       if (process.env.DATABASE_URL) {
-        await pool.query('SELECT 1');
+        // postgres-js uses sql`...` template tag syntax
+        await pool`SELECT 1`;
         healthData.database = {
           status: 'connected',
           type: 'PostgreSQL',
@@ -124,7 +125,7 @@ router.get('/health', async (req, res) => {
 router.get('/ready', async (req, res) => {
   try {
     if (process.env.DATABASE_URL) {
-      await pool.query('SELECT 1');
+      await pool`SELECT 1`;
     }
 
     res.json({
