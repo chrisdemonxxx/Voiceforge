@@ -1,12 +1,9 @@
-import { drizzle } from "drizzle-orm/neon-serverless";
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import ws from "ws";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import * as schema from "../shared/schema";
 
-neonConfig.webSocketConstructor = ws;
-
 // Lazy database initialization - only connects when actually used
-let _pool: Pool | null = null;
+let _sql: ReturnType<typeof postgres> | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
 function initializeDatabase() {
@@ -16,13 +13,22 @@ function initializeDatabase() {
     return null;
   }
 
-  if (!_pool) {
-    _pool = new Pool({ connectionString: process.env.DATABASE_URL });
-    _db = drizzle({ client: _pool, schema });
+  if (!_sql) {
+    // Parse DATABASE_URL and ensure SSL is enabled for Render PostgreSQL
+    const connectionString = process.env.DATABASE_URL;
+    
+    // postgres-js automatically handles SSL for connection strings
+    // Render PostgreSQL requires SSL, so we ensure it's enabled
+    _sql = postgres(connectionString, {
+      ssl: 'require',
+      max: 10, // Connection pool size
+    });
+    
+    _db = drizzle(_sql, { schema });
     console.log("[Database] Connected to PostgreSQL database");
   }
 
-  return { pool: _pool, db: _db };
+  return { sql: _sql, db: _db };
 }
 
 export const getDatabase = () => {
@@ -34,14 +40,26 @@ export const getDatabase = () => {
 };
 
 // Export lazy accessors
-export const pool = new Proxy({} as Pool, {
+// For compatibility, export pool as an alias to sql
+export const pool = new Proxy({} as ReturnType<typeof postgres>, {
   get(target, prop) {
-    return getDatabase().pool[prop as keyof Pool];
+    return getDatabase().sql[prop as keyof ReturnType<typeof postgres>];
+  }
+});
+
+// Export sql directly for postgres-js usage
+export const sql = new Proxy({} as ReturnType<typeof postgres>, {
+  get(target, prop) {
+    return getDatabase().sql[prop as keyof ReturnType<typeof postgres>];
   }
 });
 
 export const db = new Proxy({} as ReturnType<typeof drizzle>, {
   get(target, prop) {
-    return getDatabase().db[prop as keyof ReturnType<typeof drizzle>];
+    const database = getDatabase();
+    if (!database.db) {
+      throw new Error("Database not initialized");
+    }
+    return database.db[prop as keyof ReturnType<typeof drizzle>];
   }
 });
