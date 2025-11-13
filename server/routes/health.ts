@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
+import { pool } from '../../db/index';
 
 const execAsync = promisify(exec);
 const router = Router();
@@ -61,13 +62,18 @@ router.get('/health', async (req, res) => {
 
     // Check database connection
     try {
-      const db = (req as any).db;
-      if (db) {
-        await db.execute('SELECT 1');
+      if (process.env.DATABASE_URL) {
+        await pool.query('SELECT 1');
         healthData.database = {
           status: 'connected',
           type: 'PostgreSQL',
         };
+      } else {
+        healthData.database = {
+          status: 'not_configured',
+          message: 'DATABASE_URL not set',
+        };
+        healthData.status = 'degraded';
       }
     } catch (error: any) {
       healthData.database = {
@@ -117,9 +123,8 @@ router.get('/health', async (req, res) => {
  */
 router.get('/ready', async (req, res) => {
   try {
-    const db = (req as any).db;
-    if (db) {
-      await db.execute('SELECT 1');
+    if (process.env.DATABASE_URL) {
+      await pool.query('SELECT 1');
     }
 
     res.json({
