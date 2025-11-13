@@ -1,143 +1,72 @@
-# VoiceForge API - HF Spaces Optimized Dockerfile
-# Production deployment for GPU acceleration (Python 3.10, Node.js 20)
+# VoiceForge API - Simplified Dockerfile for HF Spaces
+# Single-stage build optimized for Hugging Face Spaces
 
-# ============================================================================
-# Stage 1: Node.js Build (Frontend + Backend TypeScript)
-# ============================================================================
-FROM node:20-slim AS node-builder
+FROM python:3.10-slim
 
-# Use existing node user (already UID 1000)
-USER node
-ENV HOME=/home/node \
-    PATH=/home/node/.local/bin:$PATH
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    build-essential \
+    git \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
 
-WORKDIR $HOME/app
+# Install Node.js 20
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy package files (as node user)
-COPY --chown=node package*.json ./
+WORKDIR /app
 
-# Install dependencies
+# Copy package files
+COPY package*.json ./
+
+# Install Node.js dependencies
 RUN npm install
 
 # Copy source code
-COPY --chown=node . .
+COPY . .
 
 # Build frontend and backend
 RUN npm run build
 
-# ============================================================================
-# Stage 2: Python ML Dependencies
-# ============================================================================
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 AS python-base
+# Install Python build prerequisites
+COPY requirements-build.txt ./
+RUN pip install --no-cache-dir -r requirements-build.txt
 
-# Set timezone non-interactively
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
+# Install PyTorch (CPU version for HF Spaces - GPU will be available at runtime)
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-dev \
-    git \
-    curl \
-    ffmpeg \
-    libsndfile1 \
-    pkg-config \
-    libavformat-dev \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavutil-dev \
-    libswscale-dev \
-    libswresample-dev \
-    libavfilter-dev \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Install Python ML dependencies
+COPY requirements-deployment.txt ./
+RUN pip install --no-cache-dir -r requirements-deployment.txt || \
+    pip install --no-cache-dir \
+    transformers==4.46.1 \
+    accelerate==0.27.2 \
+    faster-whisper==1.2.1 \
+    silero-vad==6.2.0 \
+    librosa==0.10.1 \
+    soundfile==0.12.1 \
+    huggingface-hub==0.23.2 \
+    fastapi==0.109.0 \
+    uvicorn[standard]==0.27.0
 
-# Create user with UID 1000
-RUN useradd -m -u 1000 user
-USER user
-ENV HOME=/home/user \
-    PATH=/home/user/.local/bin:$PATH
-
-WORKDIR $HOME/app
-
-# Copy requirements
-COPY --chown=user requirements-build.txt requirements-deployment.txt ./
-
-# Install PyTorch with CUDA support
-RUN pip3 install --no-cache-dir --user torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
-
-# Install build prerequisites
-RUN pip3 install --no-cache-dir --user -r requirements-build.txt
-
-# Install ML stack
-RUN pip3 install --no-cache-dir --user -r requirements-deployment.txt
-
-# ============================================================================
-# Stage 3: Final Production Image
-# ============================================================================
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
-
-# Set timezone non-interactively
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
-
-# Install runtime dependencies including Node.js 20
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    curl \
-    gnupg \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
-    && apt-get update \
-    && apt-get install -y \
-    nodejs \
-    python3 \
-    python3-pip \
-    ffmpeg \
-    libsndfile1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create user with UID 1000 and set up directories
-RUN useradd -m -u 1000 user && \
-    mkdir -p /home/user/app && \
-    chown -R user:user /home/user
+# Create runtime directories
+RUN mkdir -p /app/uploads /app/ml-cache /app/logs && \
+    chmod -R 777 /app/uploads /app/ml-cache /app/logs
 
 # Set environment variables
-ENV HOME=/home/user \
-    PATH=/home/user/.local/bin:$PATH \
-    NODE_ENV=production \
-    PYTHONUNBUFFERED=1 \
-    CUDA_VISIBLE_DEVICES=0
-
-WORKDIR /home/user/app
-
-# Copy Node.js dependencies and build artifacts (as root with chown)
-COPY --chown=user:user --from=node-builder /home/node/app/node_modules ./node_modules
-COPY --chown=user:user --from=node-builder /home/node/app/package*.json ./
-COPY --chown=user:user --from=node-builder /home/node/app/dist ./dist
-
-# Copy Python dependencies from python-base stage
-COPY --chown=user:user --from=python-base /home/user/.local /home/user/.local
-
-# Copy application source files
-COPY --chown=user:user server ./server
-COPY --chown=user:user shared ./shared
-COPY --chown=user:user db ./db
-COPY --chown=user:user requirements-deployment.txt ./
-COPY --chown=user:user app.py ./
-COPY --chown=user:user drizzle.config.ts ./
-COPY --chown=user:user tsconfig.json ./
-
-# Set ML cache environment variables
-ENV HF_HOME=/home/user/app/ml-cache \
-    TRANSFORMERS_CACHE=/home/user/app/ml-cache \
-    TORCH_HOME=/home/user/app/ml-cache
-
-# Switch to user AFTER all files are copied
-USER user
+ENV NODE_ENV=production
+ENV PORT=7860
+ENV PYTHONUNBUFFERED=1
+ENV HF_HOME=/app/ml-cache
+ENV TRANSFORMERS_CACHE=/app/ml-cache
+ENV TORCH_HOME=/app/ml-cache
 
 # Expose port 7860 (HF Spaces standard)
 EXPOSE 7860
