@@ -1,9 +1,24 @@
 import OpenAI from "openai";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+// Lazy initialization - only create client when actually used
+let _openai: OpenAI | null = null;
+
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+      throw new Error("OpenAI API key not configured - AI flow generation unavailable");
+    }
+
+    _openai = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+
+    console.log("[AI Flow Generator] OpenAI client initialized");
+  }
+
+  return _openai;
+}
 
 interface GeneratedFlow {
   name: string;
@@ -69,6 +84,7 @@ Return ONLY valid JSON matching this structure:
 }`;
 
   try {
+    const openai = getOpenAI();
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -110,6 +126,7 @@ Return ONLY valid JSON matching this structure:
 export async function enhanceFlowDescription(userInput: string): Promise<string> {
   // Use AI to expand a short description into a more detailed one
   try {
+    const openai = getOpenAI();
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
