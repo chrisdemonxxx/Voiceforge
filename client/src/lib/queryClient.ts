@@ -7,12 +7,25 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+// Get API base URL from environment or use relative path
+const getApiBaseUrl = () => {
+  // In production, use Vercel proxy (relative URLs work with vercel.json rewrites)
+  // For direct backend access, use VITE_API_URL env var
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  // Default to relative URLs (works with Vercel proxy)
+  return "";
+};
+
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const res = await fetch(url, {
+  const apiBase = getApiBaseUrl();
+  const fullUrl = url.startsWith("http") ? url : apiBase + url;
+  const res = await fetch(fullUrl, {
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
     body: data ? JSON.stringify(data) : undefined,
@@ -29,7 +42,9 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(queryKey.join("/") as string, {
+    const apiBase = getApiBaseUrl();
+    const url = apiBase + queryKey.join("/");
+    const res = await fetch(url, {
       credentials: "include",
     });
 
