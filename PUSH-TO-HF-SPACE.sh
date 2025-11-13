@@ -5,7 +5,7 @@
 set -e
 
 # Configuration
-SPACE_REPO="chrisdemonxxx/VoiceForgeAI"
+SPACE_REPO="chrisdemonxxx/voiceforge_v1.0"
 HF_SPACE_URL="https://chrisdemonxxx-voiceforge-v1-0.hf.space"
 
 # Check for HF token
@@ -32,106 +32,68 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 
-# Create temporary directory
-TEMP_DIR=$(mktemp -d)
-echo "📁 Using temp directory: $TEMP_DIR"
+# Use Python upload script (more reliable than git clone)
+echo "📦 Using Python upload method..."
+python3 << EOF
+from huggingface_hub import HfApi, login
+import os
+import sys
 
-cleanup() {
-    echo ""
-    echo "🧹 Cleaning up..."
-    rm -rf "$TEMP_DIR"
-}
-trap cleanup EXIT
+token = os.environ.get('HF_TOKEN')
+if not token:
+    print('❌ HF_TOKEN not set')
+    sys.exit(1)
 
-# Clone the HF Space repository
-echo ""
-echo "📥 Cloning HuggingFace Space..."
-git clone "https://oauth2:${HF_TOKEN}@huggingface.co/spaces/${SPACE_REPO}" "$TEMP_DIR" 2>&1 | grep -v "Cloning\|remote:" || {
-    echo "❌ Failed to clone Space. Check your HF_TOKEN and Space name."
-    exit 1
-}
+login(token=token)
+api = HfApi()
 
-cd "$TEMP_DIR"
+print('📦 Uploading essential files...')
+files_to_upload = [
+    'Dockerfile', 'app.py', 'requirements-deployment.txt', 'requirements-build.txt',
+    'package.json', 'package-lock.json', 'tsconfig.json', 'drizzle.config.ts',
+    'vite.config.ts', 'README.md', 'postcss.config.js', 'tailwind.config.ts',
+    'components.json', 'SPACE_CONFIG.yaml'
+]
 
-# Copy critical files from project root
-echo ""
-echo "📦 Copying files to Space..."
+for file in files_to_upload:
+    if os.path.exists(file):
+        try:
+            api.upload_file(
+                path_or_fileobj=file,
+                path_in_repo=file,
+                repo_id='$SPACE_REPO',
+                repo_type='space',
+                commit_message=f'Deploy {file}'
+            )
+            print(f'  ✓ {file}')
+        except Exception as e:
+            if 'No files have been modified' not in str(e):
+                print(f'  ⚠️  {file}: {str(e)[:80]}')
 
-# Essential files
-FILES_TO_COPY=(
-    "Dockerfile"
-    "app.py"
-    "requirements-deployment.txt"
-    "requirements-build.txt"
-    "README.md"
-    "package.json"
-    "package-lock.json"
-    "tsconfig.json"
-    "drizzle.config.ts"
-    "vite.config.ts"
-    "postcss.config.js"
-    "tailwind.config.ts"
-    "components.json"
-    "SPACE_CONFIG.yaml"
-)
+print('')
+print('📂 Uploading directories...')
+dirs_to_upload = ['server', 'client', 'shared', 'db', 'migrations']
 
-for file in "${FILES_TO_COPY[@]}"; do
-    if [ -f "$PROJECT_ROOT/$file" ]; then
-        cp "$PROJECT_ROOT/$file" "$file"
-        echo "  ✓ $file"
-    else
-        echo "  ⚠️  $file (not found, skipping)"
-    fi
-done
+for dir_name in dirs_to_upload:
+    if os.path.exists(dir_name):
+        try:
+            api.upload_folder(
+                folder_path=dir_name,
+                repo_id='$SPACE_REPO',
+                repo_type='space',
+                path_in_repo=dir_name,
+                commit_message=f'Deploy {dir_name}/ directory'
+            )
+            print(f'  ✓ {dir_name}/')
+        except Exception as e:
+            if 'No files have been modified' not in str(e):
+                print(f'  ⚠️  {dir_name}/: {str(e)[:80]}')
 
-# Copy essential directories
-echo ""
-echo "📂 Copying directories..."
-
-DIRS_TO_COPY=(
-    "server"
-    "client"
-    "shared"
-    "db"
-    "migrations"
-)
-
-for dir in "${DIRS_TO_COPY[@]}"; do
-    if [ -d "$PROJECT_ROOT/$dir" ]; then
-        rm -rf "$dir"
-        cp -r "$PROJECT_ROOT/$dir" "$dir"
-        echo "  ✓ $dir/"
-    else
-        echo "  ⚠️  $dir/ (not found, skipping)"
-    fi
-done
-
-# Check for changes
-echo ""
-echo "🔍 Checking for changes..."
-if git diff --quiet && git diff --cached --quiet; then
-    echo "⚠️  No changes detected. Space is already up to date."
-    echo ""
-    echo "To force update, you can:"
-    echo "1. Make a small change to README.md"
-    echo "2. Or factory reboot the Space from HF dashboard"
-    exit 0
-fi
-
-# Commit and push
-echo ""
-echo "💾 Committing changes..."
-git config user.email "deploy@voiceforge.ai"
-git config user.name "VoiceForge Deploy Bot"
-git add -A
-git commit -m "Deploy VoiceForge API updates - $(date +%Y-%m-%d)" || {
-    echo "⚠️  No changes to commit"
-    exit 0
-}
-
-echo ""
-echo "🚀 Pushing to HuggingFace Space..."
-git push origin main
+print('')
+print('✅ Deployment complete!')
+print('🚀 Space: https://huggingface.co/spaces/$SPACE_REPO')
+print('⏱️  Build will start automatically (~10-15 minutes)')
+EOF
 
 echo ""
 echo "╔════════════════════════════════════════════════════════════════╗"
@@ -143,7 +105,4 @@ echo "⏱️  Build time: ~10-15 minutes"
 echo ""
 echo "🧪 Test after deployment:"
 echo "   npx tsx test-hf-spaces-api.ts"
-echo ""
-echo "🔄 To factory reboot (if needed):"
-echo "   Go to Space Settings → Danger Zone → Factory Reboot"
 echo ""
