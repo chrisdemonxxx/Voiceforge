@@ -1,8 +1,17 @@
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
+
+// CORS configuration - allow all origins for API access
+app.use(cors({
+  origin: true, // Allow all origins (Vercel proxy and direct access)
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
 
 declare module 'http' {
   interface IncomingMessage {
