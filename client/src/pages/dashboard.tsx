@@ -110,10 +110,14 @@ export default function Dashboard() {
           vllmRequests: 0,
         };
       }
-      const response = await fetch("/api/usage", {
+      const apiBase = getApiBaseUrl();
+      const response = await fetch(`${apiBase}/api/usage`, {
         headers: authHeaders,
       });
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error("Unauthorized - API key may be invalid");
+        }
         throw new Error("Failed to fetch usage stats");
       }
       return response.json();
@@ -121,6 +125,14 @@ export default function Dashboard() {
     enabled: apiKeys.some(k => k.active), // Only fetch when there's an active key
     refetchInterval: 30000, // Refresh every 30 seconds
   });
+  
+  // Helper to get API base URL (same as in queryClient)
+  const getApiBaseUrl = () => {
+    if (import.meta.env.VITE_API_URL) {
+      return import.meta.env.VITE_API_URL;
+    }
+    return "";
+  };
 
   const handleGenerateTTS = async () => {
     if (!ttsText.trim()) {
@@ -152,7 +164,8 @@ export default function Dashboard() {
     });
 
     try {
-      const response = await fetch("/api/tts", {
+      const apiBase = getApiBaseUrl();
+      const response = await fetch(`${apiBase}/api/tts`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

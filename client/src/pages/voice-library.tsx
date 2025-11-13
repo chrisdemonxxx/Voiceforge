@@ -144,8 +144,17 @@ export default function VoiceLibrary() {
     try {
       setPlayingVoice(voiceId);
 
+      // Helper to get API base URL
+      const getApiBaseUrl = () => {
+        if (import.meta.env.VITE_API_URL) {
+          return import.meta.env.VITE_API_URL;
+        }
+        return "";
+      };
+      
       // Generate sample audio
-      const response = await fetch("/api/tts", {
+      const apiBase = getApiBaseUrl();
+      const response = await fetch(`${apiBase}/api/tts`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

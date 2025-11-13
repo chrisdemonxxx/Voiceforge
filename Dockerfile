@@ -1,146 +1,195 @@
-# VoiceForge API - HF Spaces Optimized Dockerfile
-# Production deployment for GPU acceleration (Python 3.10, Node.js 20)
+# VoiceForge API - Production Dockerfile for HF Spaces A100-80GB
+# Optimized for real production models with GPU acceleration
 
-# ============================================================================
-# Stage 1: Node.js Build (Frontend + Backend TypeScript)
-# ============================================================================
-FROM node:20-slim AS node-builder
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 
-# Use existing node user (already UID 1000)
-USER node
-ENV HOME=/home/node \
-    PATH=/home/node/.local/bin:$PATH
+# Prevent interactive prompts during build
+ENV DEBIAN_FRONTEND=noninteractive
 
-WORKDIR $HOME/app
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    build-essential \
+    git \
+    ffmpeg \
+    libsndfile1 \
+    python3.10 \
+    python3.10-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy package files (as node user)
-COPY --chown=node package*.json ./
+# Install Node.js 20
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
-RUN npm ci
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install Node.js dependencies
+RUN npm install
 
 # Copy source code
-COPY --chown=node . .
+COPY . .
 
 # Build frontend and backend
 RUN npm run build
 
-# ============================================================================
-# Stage 2: Python ML Dependencies
-# ============================================================================
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 AS python-base
-
-# Set timezone non-interactively
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-dev \
-    git \
-    curl \
-    ffmpeg \
-    libsndfile1 \
-    pkg-config \
-    libavformat-dev \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavutil-dev \
-    libswscale-dev \
-    libswresample-dev \
-    libavfilter-dev \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create user with UID 1000
-RUN useradd -m -u 1000 user
-USER user
-ENV HOME=/home/user \
-    PATH=/home/user/.local/bin:$PATH
-
-WORKDIR $HOME/app
-
-# Copy requirements
-COPY --chown=user requirements-build.txt requirements-deployment.txt ./
-
-# Install PyTorch with CUDA support
-RUN pip3 install --no-cache-dir --user torch==2.1.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121
-
-# Install build prerequisites
-RUN pip3 install --no-cache-dir --user -r requirements-build.txt
-
-# Install ML stack
-RUN pip3 install --no-cache-dir --user -r requirements-deployment.txt
+# Copy Python ML services to dist (needed for Python bridge)
+RUN mkdir -p /app/dist/ml-services && \
+    cp -r /app/server/ml-services/* /app/dist/ml-services/
 
 # ============================================================================
-# Stage 3: Final Production Image
+# Python ML Environment Setup - PRODUCTION MODELS
 # ============================================================================
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
 
-# Set timezone non-interactively
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
+# Install Python build prerequisites
+COPY requirements-build.txt ./
+RUN pip3 install --no-cache-dir -r requirements-build.txt
 
-# Install runtime dependencies including Node.js 20
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    curl \
-    gnupg \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
-    && apt-get update \
-    && apt-get install -y \
-    nodejs \
-    python3 \
-    python3-pip \
-    ffmpeg \
-    libsndfile1 \
-    && rm -rf /var/lib/apt/lists/*
+# Install PyTorch with CUDA 12.1 support (CRITICAL for A100 GPU)
+RUN pip3 install --no-cache-dir \
+    torch==2.1.2 \
+    torchaudio==2.1.2 \
+    --index-url https://download.pytorch.org/whl/cu121
 
-# Create user with UID 1000 and set up directories
-RUN useradd -m -u 1000 user && \
-    mkdir -p /home/user/app && \
-    chown -R user:user /home/user
+# Install vLLM 0.6.0 with CUDA 12.1 support (for Llama-3.3-70B)
+RUN pip3 install --no-cache-dir vllm==0.6.0
 
-# Set environment variables
-ENV HOME=/home/user \
-    PATH=/home/user/.local/bin:$PATH \
-    NODE_ENV=production \
-    PYTHONUNBUFFERED=1 \
-    CUDA_VISIBLE_DEVICES=0
+# Install core ML dependencies
+COPY requirements-deployment.txt ./
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip3 install --no-cache-dir \
+    transformers==4.46.1 \
+    accelerate==0.27.2 \
+    optimum==1.18.0 \
+    einops==0.7.0 \
+    sentencepiece==0.2.0 \
+    protobuf==4.25.3
 
-WORKDIR /home/user/app
+# Install TTS models (production-ready)
+RUN pip3 install --no-cache-dir \
+    chatterbox-tts==0.1.0 \
+    styletts2==0.1.7 \
+    TTS==0.22.0
 
-# Copy Node.js dependencies and build artifacts (as root with chown)
-COPY --chown=user:user --from=node-builder /home/node/app/node_modules ./node_modules
-COPY --chown=user:user --from=node-builder /home/node/app/package*.json ./
-COPY --chown=user:user --from=node-builder /home/node/app/dist ./dist
+# Install STT (faster-whisper with CTranslate2)
+RUN pip3 install --no-cache-dir \
+    faster-whisper==1.2.1 \
+    ctranslate2==4.4.0 \
+    openai-whisper==20231117
 
-# Copy Python dependencies from python-base stage
-COPY --chown=user:user --from=python-base /home/user/.local /home/user/.local
+# Install VAD (Silero VAD v5)
+RUN pip3 install --no-cache-dir \
+    silero-vad==6.2.0 \
+    silero==0.4.2 \
+    webrtcvad==2.0.10
 
-# Copy application source files
-COPY --chown=user:user server ./server
-COPY --chown=user:user shared ./shared
-COPY --chown=user:user db ./db
-COPY --chown=user:user requirements-deployment.txt ./
-COPY --chown=user:user app.py ./
-COPY --chown=user:user drizzle.config.ts ./
-COPY --chown=user:user tsconfig.json ./
+# Install voice cloning dependencies
+RUN pip3 install --no-cache-dir \
+    resemblyzer==0.1.1.dev0 \
+    speechbrain==0.5.16
 
-# Set ML cache environment variables
-ENV HF_HOME=/home/user/app/ml-cache \
-    TRANSFORMERS_CACHE=/home/user/app/ml-cache \
-    TORCH_HOME=/home/user/app/ml-cache
+# Install audio processing libraries
+RUN pip3 install --no-cache-dir \
+    librosa==0.10.1 \
+    soundfile==0.12.1 \
+    pydub==0.25.1 \
+    audioread==3.0.1 \
+    resampy==0.4.2 \
+    scipy==1.11.4
 
-# Switch to user AFTER all files are copied
-USER user
+# Install model management tools
+RUN pip3 install --no-cache-dir \
+    huggingface-hub==0.23.2 \
+    safetensors==0.4.1 \
+    bitsandbytes==0.42.0 \
+    xformers==0.0.27 \
+    peft==0.12.0
+
+# Install API framework
+RUN pip3 install --no-cache-dir \
+    fastapi==0.109.0 \
+    uvicorn[standard]==0.27.0 \
+    python-multipart==0.0.6 \
+    aiofiles==23.2.1 \
+    gradio==4.19.1
+
+# Install utilities
+RUN pip3 install --no-cache-dir \
+    pyyaml==6.0.1 \
+    python-dotenv==1.0.0 \
+    requests==2.31.0 \
+    httpx==0.26.0 \
+    pillow==10.2.0 \
+    tqdm==4.66.1 \
+    loguru==0.7.2 \
+    psutil==5.9.7
+
+# ============================================================================
+# Pre-download Production Models (speeds up first startup)
+# ============================================================================
+
+# Pre-download Whisper large-v3 model
+RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('large-v3', device='cpu', compute_type='int8', download_root='/app/ml-cache')" || true
+
+# Pre-download Silero VAD v5
+RUN python3 -c "import torch; torch.hub.set_dir('/app/ml-cache'); torch.hub.load('snakers4/silero-vad', 'silero_vad', force_reload=False, trust_repo=True)" || true
+
+# Pre-download StyleTTS2 models (if available)
+RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download('yl4579/StyleTTS2-LibriTTS', cache_dir='/app/ml-cache')" || true
+
+# Pre-download Higgs Audio V2 models
+RUN python3 -c "from transformers import AutoProcessor, AutoModel; AutoProcessor.from_pretrained('bosonai/higgs-audio-v2-tokenizer', cache_dir='/app/ml-cache', trust_remote_code=True)" || true
+RUN python3 -c "from transformers import AutoModel; AutoModel.from_pretrained('bosonai/higgs-audio-v2-generation-3B-base', cache_dir='/app/ml-cache', trust_remote_code=True)" || true
+
+# Pre-download Llama-3.3-70B-Instruct (will take time but speeds up first run)
+# Note: This requires HF authentication token set via HF_TOKEN environment variable
+RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download('meta-llama/Llama-3.3-70B-Instruct', cache_dir='/app/ml-cache', ignore_patterns=['*.safetensors'])" || echo "Llama model download requires HF_TOKEN"
+
+# ============================================================================
+# Runtime Configuration
+# ============================================================================
+
+# Create runtime directories with proper permissions
+RUN mkdir -p /app/uploads /app/ml-cache /app/logs /tmp/voiceforge && \
+    chmod -R 777 /app/uploads /app/ml-cache /app/logs /tmp/voiceforge
+
+# Set environment variables for production
+ENV NODE_ENV=production
+ENV PORT=7860
+ENV GRADIO_PORT=7860
+ENV PYTHONUNBUFFERED=1
+
+# GPU optimization for A100 80GB
+ENV CUDA_VISIBLE_DEVICES=0
+ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+ENV OMP_NUM_THREADS=8
+
+# Model caching
+ENV HF_HOME=/app/ml-cache
+ENV TRANSFORMERS_CACHE=/app/ml-cache
+ENV TORCH_HOME=/app/ml-cache
+
+# vLLM optimization for A100
+ENV VLLM_USE_MODELSCOPE=False
+ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+# Set API base URL
+ENV API_BASE_URL=http://localhost:7861
 
 # Expose port 7860 (HF Spaces standard)
 EXPOSE 7860
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:7860/ || exit 1
 
 # Start application
 CMD ["python3", "app.py"]

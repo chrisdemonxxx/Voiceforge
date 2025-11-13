@@ -46,13 +46,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Initialize ML client (Python worker pools or HF Spaces API)
   console.log("[Server] Initializing ML client...");
-  try {
-    await mlClient.initialize();
-    console.log("[Server] ML client initialized successfully");
-  } catch (error) {
-    console.error("[Server] Failed to initialize ML client:", error);
-    console.log("[Server] Continuing without ML client (may have reduced functionality)");
-  }
+  let mlClientInitialized = false;
+  const maxRetries = 3;
+  const retryDelay = 15000; // 15 seconds
+  
+  const tryInitialize = async (attempt: number): Promise<void> => {
+    try {
+      await mlClient.initialize();
+      mlClientInitialized = true;
+      (global as any).mlClientInitialized = true;
+      console.log("[Server] ✅ ML client initialized successfully");
+    } catch (error: any) {
+      console.error(`[Server] ❌ ML client initialization failed (attempt ${attempt}/${maxRetries}):`, error.message);
+      
+      if (attempt < maxRetries) {
+        console.log(`[Server] Retrying ML client initialization in ${retryDelay/1000}s...`);
+        setTimeout(async () => {
+          await tryInitialize(attempt + 1);
+        }, retryDelay);
+      } else {
+        console.error("[Server] ⚠️  ML client initialization failed after all retries");
+        console.error("[Server] Error details:", error.message);
+        console.log("[Server] Continuing without ML client (may have reduced functionality)");
+        console.log("[Server] TTS/STT/VAD/Voice Cloning endpoints will return 503 until ML client is ready");
+        console.log("[Server] Troubleshooting:");
+        console.log("  1. Check if Python 3 is installed: python3 --version");
+        console.log("  2. Verify worker_pool.py exists in server/ml-services/");
+        console.log("  3. Check Python dependencies: pip install -r requirements-deployment.txt");
+        console.log("  4. Review server logs for detailed error messages");
+        (global as any).mlClientInitialized = false;
+      }
+    }
+  };
+  
+  await tryInitialize(1);
   
   // Setup graceful shutdown
   const shutdown = async () => {
@@ -184,7 +211,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const keys = await storage.getAllApiKeys();
       res.json(keys);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      // If database is not available, return a default API key for ML-only deployments
+      if (error.message?.includes("Database not available") || error.message?.includes("DATABASE_URL")) {
+        console.log("[API Keys] Database not available, returning default API key for ML-only deployment");
+        res.json([{
+          id: "default-ml-key",
+          name: "Default ML API Key",
+          key: "vf_sk_19798aa99815232e6d53e1af34f776e1",
+          createdAt: new Date().toISOString(),
+          usage: 0,
+          active: true,
+          rateLimit: 1000
+        }]);
+      } else {
+        res.status(500).json({ error: error.message });
+      }
     }
   });
 
@@ -269,6 +310,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const startTime = Date.now();
       const data = ttsRequestSchema.parse(req.body);
       
+      // Check if ML client is initialized
+      if (!mlClient || typeof mlClient.callTTS !== 'function') {
+        return res.status(503).json({ 
+          error: "TTS service is not initialized. Please wait a moment and try again.",
+          service: "ml_client",
+          retry_after: 5
+        });
+      }
+      
       // Prepare voice data for TTS service
       let voiceData: any = {
         voice: data.voice,
@@ -282,14 +332,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      // Call Python TTS service
-      const audioBuffer = await mlClient.callTTS({
-        text: data.text,
-        model: data.model,
-        voice: voiceData.voice,
-        speed: data.speed,
-        voice_characteristics: voiceData.voice_characteristics,
-      });
+      // Retry logic for TTS calls
+      let audioBuffer: Buffer | null = null;
+      let lastError: Error | null = null;
+      const maxRetries = 3;
+      const retryDelays = [1000, 2000, 5000]; // 1s, 2s, 5s
+      
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          // Call Python TTS service
+          audioBuffer = await mlClient.callTTS({
+            text: data.text,
+            model: data.model,
+            voice: voiceData.voice,
+            speed: data.speed,
+            voice_characteristics: voiceData.voice_characteristics,
+          });
+          
+          // Success - break out of retry loop
+          break;
+        } catch (error: any) {
+          lastError = error;
+          console.warn(`[TTS] Attempt ${attempt + 1}/${maxRetries} failed:`, error.message);
+          
+          // Don't retry on validation errors
+          if (error instanceof z.ZodError || error.message.includes("Invalid input")) {
+            throw error;
+          }
+          
+          // Don't retry on last attempt
+          if (attempt < maxRetries - 1) {
+            const delay = retryDelays[attempt];
+            console.log(`[TTS] Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
+      }
+      
+      // If all retries failed
+      if (!audioBuffer) {
+        throw lastError || new Error("TTS failed after retries");
+      }
       
       const processingTime = Date.now() - startTime;
       
@@ -310,27 +393,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error.message.includes("503") || error.message.includes("Model is loading")) {
         return res.status(503).json({ 
           error: "Model is loading. Please try again in a few seconds.",
-          retry_after: 10
+          retry_after: 10,
+          service: "model_loading"
         });
       }
       
       if (error.message.includes("HF API error") || error.message.includes("HF TTS")) {
         return res.status(503).json({ 
           error: "Hugging Face service temporarily unavailable. Please try again.",
-          service: "huggingface"
+          service: "huggingface",
+          retry_after: 5
         });
       }
       
       // Worker pool errors
-      if (error.message.includes("Worker pool") || error.message.includes("worker")) {
+      if (error.message.includes("Worker pool") || error.message.includes("worker") || error.message.includes("not initialized")) {
         return res.status(503).json({ 
-          error: "TTS service temporarily unavailable. Please try again.",
-          service: "worker_pool"
+          error: "TTS service temporarily unavailable. The worker pool may still be initializing. Please try again in a few seconds.",
+          service: "worker_pool",
+          retry_after: 5,
+          hint: "Check /api/health endpoint for ML worker status"
+        });
+      }
+      
+      // Timeout errors
+      if (error.message.includes("timeout") || error.message.includes("Timeout")) {
+        return res.status(503).json({ 
+          error: "TTS service timeout. The service may be overloaded. Please try again.",
+          service: "timeout",
+          retry_after: 10
         });
       }
       
       // Generic error
-      res.status(500).json({ error: error.message || "Failed to generate speech" });
+      res.status(500).json({ 
+        error: error.message || "Failed to generate speech",
+        service: "unknown"
+      });
     }
   });
 

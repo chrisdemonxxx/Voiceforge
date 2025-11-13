@@ -54,8 +54,17 @@ export default function Home() {
     setGeneratedAudio(null);
     
     try {
+      // Helper to get API base URL
+      const getApiBaseUrl = () => {
+        if (import.meta.env.VITE_API_URL) {
+          return import.meta.env.VITE_API_URL;
+        }
+        return "";
+      };
+      
       // Use the authenticated /api/tts endpoint with public demo key
-      const response = await fetch("/api/tts", {
+      const apiBase = getApiBaseUrl();
+      const response = await fetch(`${apiBase}/api/tts`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

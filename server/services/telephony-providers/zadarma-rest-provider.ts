@@ -123,6 +123,48 @@ export class ZadarmaRESTProvider {
   }
 
   /**
+   * Initiate call (alias for makeCall to match interface)
+   */
+  async initiateCall(options: {
+    from: string;
+    to: string;
+    url?: string;
+    statusCallback?: string;
+    statusCallbackMethod?: string;
+    record?: boolean;
+  }): Promise<{
+    providerCallId: string;
+    status: string;
+    direction: "inbound" | "outbound";
+  }> {
+    const result = await this.makeCall(
+      options.from,
+      options.to,
+      options.url || ''
+    );
+    
+    return {
+      providerCallId: result.callId,
+      status: result.status,
+      direction: "outbound"
+    };
+  }
+
+  /**
+   * End an active call
+   */
+  async endCall(callSid: string): Promise<void> {
+    await this.hangupCall(callSid);
+  }
+
+  /**
+   * Get call details
+   */
+  async getCallDetails(callSid: string): Promise<any> {
+    return this.getCallStats(callSid);
+  }
+
+  /**
    * Answer inbound call
    */
   async answerCall(

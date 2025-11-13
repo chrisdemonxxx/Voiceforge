@@ -10,9 +10,16 @@ sdk: docker
 pinned: false
 license: mit
 
+# UI Mode: Gradio (for testing and API access)
+# Express API runs on port 7861 (internal)
+# Gradio UI runs on port 7860 (public)
+
 # GPU configuration - starts with CPU, upgrade to A100 after creation
 # Upgrade via Space Settings → Hardware → A100 - 80GB
 app_port: 7860
+
+# Hardware (optional - set via Space Settings)
+# hardware: cpu-basic  # Start with CPU, upgrade later
 
 # Suggested tags for discoverability
 tags:
@@ -40,18 +47,4 @@ startup_duration_timeout: 600  # 10 minutes
 
 # Environment variables (sensitive values set via Space Settings → Repository secrets)
 # Do not put actual secrets here - this is for documentation only
-env:
-  - name: NODE_ENV
-    value: production
-  - name: PORT
-    value: "7860"
-  - name: CUDA_VISIBLE_DEVICES
-    value: "0"
-  - name: PYTORCH_CUDA_ALLOC_CONF
-    value: "max_split_size_mb:512"
-  - name: HF_HOME
-    value: "/app/ml-cache"
-  - name: TRANSFORMERS_CACHE
-    value: "/app/ml-cache"
-  - name: TORCH_HOME
-    value: "/app/ml-cache"
+# Note: Environment variables are set in Dockerfile, not here

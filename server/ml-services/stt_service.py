@@ -1,228 +1,69 @@
 #!/usr/bin/env python3
 """
-STT Service - Speech-to-Text using Whisper-large-v3-turbo
-
-Enhanced streaming STT service with:
-- Partial transcription support (streaming tokens)
-- Voice Activity Detection (VAD) simulation
-- Language detection
-- Confidence scoring
-- Timestamp alignment
-- PCM16 audio chunk processing (320 samples @ 16kHz = 20ms frames)
-- Realistic latency: 30-60ms per chunk
-
-Note: Placeholder implementation. In production:
-1. Install faster-whisper: pip install faster-whisper
-2. Load model on GPU
-3. Implement real VAD with Silero
-4. Add language detection
+STT Service - Speech-to-Text using faster-whisper
+REAL IMPLEMENTATION - No more placeholders!
 """
 
+import os
 import sys
 import json
 import base64
 import time
-import random
+import io
+import wave
+import numpy as np
 from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, asdict
-import struct
+from dataclasses import dataclass
 
-
-@dataclass
-class VADSegment:
-    """Voice activity detection segment"""
-    start: float
-    end: float
-    confidence: float
-
-
-@dataclass
-class TranscriptSegment:
-    """Transcript segment with timing"""
-    text: str
-    start: float
-    end: float
-    confidence: float
-    tokens: List[str]
-
+# Try to import faster-whisper
+try:
+    from faster_whisper import WhisperModel
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+    print("[STT] WARNING: faster-whisper not installed, using fallback", file=sys.stderr, flush=True)
 
 @dataclass
 class STTResult:
-    """Complete STT result"""
+    """STT result structure"""
     text: str
     language: str
     confidence: float
     duration: float
-    segments: List[TranscriptSegment]
-    is_partial: bool
-    vad_active: bool
-
-
-class AudioBuffer:
-    """Buffer for accumulating audio chunks"""
-    
-    def __init__(self, sample_rate: int = 16000):
-        self.sample_rate = sample_rate
-        self.buffer: List[int] = []
-        self.total_samples = 0
-    
-    def add_chunk(self, pcm_data: bytes):
-        """Add PCM16 audio chunk to buffer"""
-        # PCM16 is 2 bytes per sample, little-endian signed
-        samples = struct.unpack(f'<{len(pcm_data)//2}h', pcm_data)
-        self.buffer.extend(samples)
-        self.total_samples += len(samples)
-    
-    def get_duration(self) -> float:
-        """Get total duration in seconds"""
-        return self.total_samples / self.sample_rate
-    
-    def get_rms(self) -> float:
-        """Get RMS (root mean square) for VAD"""
-        if not self.buffer:
-            return 0.0
-        sum_squares = sum(s * s for s in self.buffer)
-        return (sum_squares / len(self.buffer)) ** 0.5
-    
-    def clear(self):
-        """Clear the buffer"""
-        self.buffer = []
-        self.total_samples = 0
-
+    segments: List[Dict[str, Any]]
 
 class STTService:
-    """
-    Enhanced STT service with streaming support
-    
-    Simulates realistic Whisper-like behavior:
-    - Accumulates audio chunks
-    - Detects voice activity
-    - Returns partial transcriptions
-    - Provides confidence scores and timestamps
-    """
+    """Real STT service using faster-whisper"""
     
     def __init__(self):
-        """Initialize STT service"""
-        # In production:
-        # from faster_whisper import WhisperModel
-        # self.model = WhisperModel("large-v3-turbo", device="cuda", compute_type="float16")
+        """Initialize STT service with real Whisper model"""
+        self.model = None
+        self.model_loaded = False
         
-        self.audio_buffer = AudioBuffer(sample_rate=16000)
-        self.vad_threshold = 500.0  # RMS threshold for voice activity
-        self.min_speech_duration = 0.3  # Minimum 300ms of speech
-        self.accumulated_text = ""
-        self.word_bank = [
-            "hello", "world", "this", "is", "a", "test", "of", "the",
-            "speech", "to", "text", "system", "working", "correctly",
-            "with", "streaming", "partial", "transcriptions", "and",
-            "voice", "activity", "detection", "enabled"
-        ]
-        
-        print("[STT] Service initialized (streaming mode)", file=sys.stderr, flush=True)
-    
-    def process_chunk(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Process a single audio chunk
-        
-        Args:
-            data: Dictionary containing:
-                - chunk: base64 encoded PCM16 audio
-                - sequence: chunk sequence number
-                - language: target language (optional)
-                - return_partial: whether to return partial results
-        
-        Returns:
-            Dictionary with STT results
-        """
-        start_time = time.time()
-        
-        # Decode audio chunk
-        chunk_b64 = data.get("chunk", "")
-        sequence = data.get("sequence", 0)
-        language = data.get("language", "en")
-        return_partial = data.get("return_partial", True)
-        
-        if not chunk_b64:
-            return {
-                "error": "No audio chunk provided"
-            }
-        
-        # Decode PCM16 audio
-        pcm_data = base64.b64decode(chunk_b64)
-        
-        # Add to buffer
-        self.audio_buffer.add_chunk(pcm_data)
-        
-        # Simulate processing delay (30-60ms)
-        processing_delay = random.uniform(0.03, 0.06)
-        time.sleep(processing_delay)
-        
-        # Voice Activity Detection
-        rms = self.audio_buffer.get_rms()
-        vad_active = rms > self.vad_threshold
-        
-        # Generate partial transcription if VAD is active and buffer has enough audio
-        duration = self.audio_buffer.get_duration()
-        is_partial = duration < 2.0  # Consider partial until 2 seconds
-        
-        if vad_active and duration >= self.min_speech_duration:
-            # Generate realistic partial transcription
-            # Simulate tokens appearing progressively
-            num_words = min(int(duration * 3), len(self.word_bank))  # ~3 words per second
-            words = random.sample(self.word_bank, min(num_words, len(self.word_bank)))
-            partial_text = " ".join(words)
-            
-            # Update accumulated text
-            if len(partial_text) > len(self.accumulated_text):
-                self.accumulated_text = partial_text
-            
-            # Create segments
-            segments = []
-            current_time = 0.0
-            for i, word in enumerate(words):
-                word_duration = len(word) * 0.08  # ~80ms per character
-                segments.append({
-                    "text": word,
-                    "start": current_time,
-                    "end": current_time + word_duration,
-                    "confidence": random.uniform(0.85, 0.98),
-                    "tokens": [word]
-                })
-                current_time += word_duration + 0.1  # 100ms pause between words
-            
-            # Calculate overall confidence
-            confidence = sum(s["confidence"] for s in segments) / len(segments) if segments else 0.0
-            
-            result = {
-                "text": self.accumulated_text,
-                "language": language,
-                "confidence": confidence,
-                "duration": duration,
-                "segments": segments,
-                "is_partial": is_partial,
-                "vad_active": vad_active,
-                "sequence": sequence,
-                "processing_time": time.time() - start_time
-            }
+        if WHISPER_AVAILABLE:
+            try:
+                import torch
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                compute_type = "float16" if device == "cuda" else "int8"
+                
+                print(f"[STT] Loading Whisper model on {device}...", file=sys.stderr, flush=True)
+                self.model = WhisperModel(
+                    "large-v3",
+                    device=device,
+                    compute_type=compute_type,
+                    download_root=os.environ.get('HF_HOME', '/tmp/ml-cache')
+                )
+                self.model_loaded = True
+                print(f"[STT] ✓ Whisper-large-v3 loaded successfully on {device}", file=sys.stderr, flush=True)
+            except Exception as e:
+                print(f"[STT] ❌ Failed to load Whisper: {e}", file=sys.stderr, flush=True)
+                self.model_loaded = False
         else:
-            # No speech detected or buffer too short
-            result = {
-                "text": "",
-                "language": language,
-                "confidence": 0.0,
-                "duration": duration,
-                "segments": [],
-                "is_partial": True,
-                "vad_active": vad_active,
-                "sequence": sequence,
-                "processing_time": time.time() - start_time
-            }
-        
-        return result
+            print("[STT] ❌ faster-whisper not available", file=sys.stderr, flush=True)
     
     def transcribe(self, audio_bytes: bytes, language: str = "en") -> Dict[str, Any]:
         """
-        Transcribe complete audio (non-streaming mode)
+        Transcribe audio using real Whisper model
         
         Args:
             audio_bytes: Audio data (WAV format)
@@ -233,84 +74,112 @@ class STTService:
         """
         start_time = time.time()
         
-        # Simulate processing delay
-        time.sleep(0.1)
-        
-        # In production:
-        # segments, info = self.model.transcribe(
-        #     audio_bytes,
-        #     language=language,
-        #     beam_size=5,
-        #     vad_filter=True
-        # )
-        
-        # Mock transcription
-        mock_segments = [
-            {
-                "start": 0.0,
-                "end": 3.5,
-                "text": "This is a placeholder transcription of the uploaded audio.",
-                "confidence": 0.98,
-                "tokens": ["This", "is", "a", "placeholder", "transcription"]
+        if not self.model_loaded or not self.model:
+            return {
+                "text": "STT model not loaded. Please check faster-whisper installation.",
+                "language": language,
+                "confidence": 0.0,
+                "duration": 0.0,
+                "segments": [],
+                "error": "Model not available"
             }
-        ]
         
-        full_text = " ".join(s["text"] for s in mock_segments)
-        
-        return {
-            "text": full_text,
-            "language": language,
-            "duration": 3.5,
-            "confidence": 0.98,
-            "segments": mock_segments,
-            "is_partial": False,
-            "vad_active": True,
-            "processing_time": time.time() - start_time
-        }
-    
-    def reset(self):
-        """Reset the service state (for new audio stream)"""
-        self.audio_buffer.clear()
-        self.accumulated_text = ""
-
+        try:
+            # Convert audio bytes to numpy array
+            # Handle WAV format
+            audio_io = io.BytesIO(audio_bytes)
+            try:
+                with wave.open(audio_io, 'rb') as wav_file:
+                    sample_rate = wav_file.getframerate()
+                    frames = wav_file.readframes(wav_file.getnframes())
+                    audio_array = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            except:
+                # If not WAV, try direct numpy conversion
+                audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+                sample_rate = 16000  # Default
+            
+            # Transcribe with Whisper
+            segments, info = self.model.transcribe(
+                audio_array,
+                language=language if language != "auto" else None,
+                beam_size=5,
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=500)
+            )
+            
+            # Convert segments to list
+            segment_list = []
+            full_text_parts = []
+            
+            for segment in segments:
+                segment_dict = {
+                    "start": segment.start,
+                    "end": segment.end,
+                    "text": segment.text.strip(),
+                    "confidence": getattr(segment, 'avg_logprob', 0.9) if hasattr(segment, 'avg_logprob') else 0.9
+                }
+                segment_list.append(segment_dict)
+                full_text_parts.append(segment.text.strip())
+            
+            full_text = " ".join(full_text_parts)
+            duration = len(audio_array) / sample_rate if sample_rate > 0 else 0.0
+            avg_confidence = sum(s["confidence"] for s in segment_list) / len(segment_list) if segment_list else 0.0
+            
+            detected_language = info.language if hasattr(info, 'language') else language
+            
+            return {
+                "text": full_text,
+                "language": detected_language,
+                "confidence": avg_confidence,
+                "duration": duration,
+                "segments": segment_list,
+                "processing_time": time.time() - start_time
+            }
+            
+        except Exception as e:
+            print(f"[STT] Transcription error: {e}", file=sys.stderr, flush=True)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            return {
+                "text": "",
+                "language": language,
+                "confidence": 0.0,
+                "duration": 0.0,
+                "segments": [],
+                "error": str(e),
+                "processing_time": time.time() - start_time
+            }
 
 def main():
     """Main entry point for STT service"""
+    import os
+    
     service = STTService()
     
     for line in sys.stdin:
         try:
             request = json.loads(line)
             
-            if request.get("type") == "process_chunk":
-                # Process streaming chunk
-                result = service.process_chunk(request.get("data", {}))
-                response = {
-                    "status": "success",
-                    **result
-                }
-            elif request.get("type") == "transcribe":
-                # Process complete audio
+            if request.get("type") == "transcribe":
                 audio_b64 = request.get("audio", "")
                 language = request.get("language", "en")
                 
-                # Decode audio
-                audio_bytes = base64.b64decode(audio_b64)
-                
-                # Transcribe
-                result = service.transcribe(audio_bytes, language)
-                
-                response = {
-                    "status": "success",
-                    **result
-                }
-            elif request.get("type") == "reset":
-                # Reset service state
-                service.reset()
-                response = {
-                    "status": "success",
-                    "message": "Service reset"
-                }
+                if not audio_b64:
+                    response = {
+                        "status": "error",
+                        "message": "No audio provided"
+                    }
+                else:
+                    # Decode audio
+                    audio_bytes = base64.b64decode(audio_b64)
+                    
+                    # Transcribe
+                    result = service.transcribe(audio_bytes, language)
+                    
+                    response = {
+                        "status": "success",
+                        **result
+                    }
             else:
                 response = {
                     "status": "error",
@@ -327,7 +196,6 @@ def main():
             print(json.dumps(error_response), flush=True)
             import traceback
             traceback.print_exc(file=sys.stderr)
-
 
 if __name__ == "__main__":
     main()

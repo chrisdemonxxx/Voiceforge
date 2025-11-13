@@ -84,21 +84,38 @@ router.get('/health', async (req, res) => {
       healthData.status = 'degraded';
     }
 
-    // Check ML worker pool
+    // Check ML worker pool and client initialization
     try {
+      const mlClientInitialized = (global as any).mlClientInitialized;
       const workerPool = (global as any).mlWorkerPool;
+      
+      healthData.ml_workers = {
+        initialized: mlClientInitialized || false,
+        status: mlClientInitialized ? 'available' : 'initializing',
+      };
+      
       if (workerPool) {
         const workers = workerPool.getWorkers();
         healthData.ml_workers = {
+          ...healthData.ml_workers,
           total: workers.length,
           active: workers.filter((w: any) => w.busy).length,
           idle: workers.filter((w: any) => !w.busy).length,
         };
       }
+      
+      // If not initialized, mark status as degraded
+      if (!mlClientInitialized) {
+        healthData.status = 'degraded';
+        healthData.ml_workers.message = 'ML services are still initializing. TTS/STT/VAD endpoints may return 503.';
+      }
     } catch (error) {
       healthData.ml_workers = {
         status: 'unavailable',
+        initialized: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
       };
+      healthData.status = 'degraded';
     }
 
     // Check feature availability

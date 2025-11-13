@@ -2,11 +2,64 @@ import { useQuery } from "@tanstack/react-query";
 import { BarChart3, TrendingUp, CreditCard, Activity } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { UsageStats } from "@shared/schema";
+import type { UsageStats, ApiKey } from "@shared/schema";
 
 export default function Usage() {
+  // Fetch API keys first
+  const { data: apiKeys = [] } = useQuery<ApiKey[]>({
+    queryKey: ["/api/keys"],
+    retry: false,
+  });
+
+  // Helper to get auth headers
+  const getAuthHeaders = () => {
+    const activeKey = apiKeys.find(k => k.active);
+    if (!activeKey) {
+      return null;
+    }
+    return {
+      "Authorization": `Bearer ${activeKey.key}`,
+    };
+  };
+
+  // Helper to get API base URL
+  const getApiBaseUrl = () => {
+    if (import.meta.env.VITE_API_URL) {
+      return import.meta.env.VITE_API_URL;
+    }
+    return "";
+  };
+
   const { data: stats, isLoading } = useQuery<UsageStats>({
-    queryKey: ["/api/usage"],
+    queryKey: ["/api/usage", apiKeys.length],
+    queryFn: async () => {
+      const authHeaders = getAuthHeaders();
+      if (!authHeaders) {
+        // Return default empty stats if no active key
+        return {
+          totalRequests: 0,
+          successRate: 0,
+          avgLatency: 0,
+          requestsToday: 0,
+          ttsRequests: 0,
+          sttRequests: 0,
+          vadRequests: 0,
+          vllmRequests: 0,
+        };
+      }
+      const apiBase = getApiBaseUrl();
+      const response = await fetch(`${apiBase}/api/usage`, {
+        headers: authHeaders,
+      });
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error("Unauthorized - API key may be invalid");
+        }
+        throw new Error("Failed to fetch usage stats");
+      }
+      return response.json();
+    },
+    enabled: apiKeys.some(k => k.active), // Only fetch when there's an active key
     retry: false,
   });
 

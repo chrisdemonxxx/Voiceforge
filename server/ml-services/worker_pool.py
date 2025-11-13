@@ -163,8 +163,17 @@ class Worker:
     def _process_task(self, service, task: Task) -> Dict[str, Any]:
         """Process a task using the loaded service"""
         if self.worker_type == WorkerType.STT:
-            # STT task processing
-            return service.process_chunk(task.data)
+            # STT task processing - use transcribe method for real STT
+            import base64
+            audio_b64 = task.data.get("audio", "")
+            language = task.data.get("language", "en")
+            
+            if not audio_b64:
+                return {"error": "No audio provided"}
+            
+            audio_bytes = base64.b64decode(audio_b64)
+            result = service.transcribe(audio_bytes, language)
+            return result
         elif self.worker_type == WorkerType.TTS:
             # TTS task processing
             audio_bytes = service.synthesize(

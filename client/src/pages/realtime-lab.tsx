@@ -85,6 +85,27 @@ export default function RealTimeLab() {
   const playbackContextRef = useRef<AudioContext | null>(null);
   const audioBufferQueueRef = useRef<AudioBuffer[]>([]);
   
+  // Helper to get WebSocket URL
+  const getWebSocketUrl = () => {
+    // If VITE_API_URL is set, use it for WebSocket (direct backend connection)
+    if (import.meta.env.VITE_API_URL) {
+      const apiUrl = import.meta.env.VITE_API_URL;
+      // Convert http/https to ws/wss
+      const wsUrl = apiUrl.replace(/^http/, "ws");
+      return `${wsUrl}/ws/realtime`;
+    }
+    
+    // If VITE_WS_URL is explicitly set, use it
+    if (import.meta.env.VITE_WS_URL) {
+      return import.meta.env.VITE_WS_URL;
+    }
+    
+    // Default: connect directly to Render backend
+    // Vercel doesn't support WebSocket proxying, so we need direct connection
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//voiceforge-api.onrender.com/ws/realtime`;
+  };
+
   // WebSocket connection
   const connect = () => {
     if (!activeApiKey) {
@@ -92,8 +113,9 @@ export default function RealTimeLab() {
       return;
     }
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/realtime`);
+    const wsUrl = getWebSocketUrl();
+    console.log("[RealTimeLab] Connecting to WebSocket:", wsUrl);
+    const ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
       console.log("[RealTimeLab] WebSocket connected");
