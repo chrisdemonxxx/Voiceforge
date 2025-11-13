@@ -4,9 +4,27 @@ import { fileURLToPath } from "url";
 import { dirname } from "path";
 import { v4 as uuidv4 } from "uuid";
 import { EventEmitter } from "events";
+import { existsSync } from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Helper function to resolve Python script paths
+// In production, Python files may be in dist/ml-services or server/ml-services
+function resolvePythonScript(scriptName: string): string {
+  const distPath = path.join(__dirname, "ml-services", scriptName);
+  const sourcePath = path.join(process.cwd(), "server", "ml-services", scriptName);
+  
+  // Prefer dist path if it exists, otherwise use source path
+  if (existsSync(distPath)) {
+    return distPath;
+  }
+  if (existsSync(sourcePath)) {
+    return sourcePath;
+  }
+  // Fallback to dist path (will error if not found, but that's expected)
+  return distPath;
+}
 
 interface TTSRequest {
   text: string;
@@ -116,7 +134,7 @@ class WorkerPool {
       throw new Error("Worker pool already started");
     }
     
-    const scriptPath = path.join(__dirname, "ml-services", "worker_pool.py");
+    const scriptPath = resolvePythonScript("worker_pool.py");
     
     return new Promise((resolve, reject) => {
       this.process = spawn("python3", [
@@ -573,7 +591,7 @@ export class PythonBridge {
     request: TTSStreamingRequest,
     onChunk: (chunk: TTSChunkResponse) => void
   ): Promise<void> {
-    const scriptPath = path.join(__dirname, "ml-services", "tts_streaming.py");
+    const scriptPath = resolvePythonScript("tts_streaming.py");
     
     return new Promise((resolve, reject) => {
       const python = spawn(this.pythonPath, [scriptPath]);
@@ -637,7 +655,7 @@ export class PythonBridge {
   }
   
   private async callTTSSpawn(request: TTSRequest): Promise<Buffer> {
-    const scriptPath = path.join(__dirname, "ml-services", "tts_service.py");
+    const scriptPath = resolvePythonScript("tts_service.py");
     
     return new Promise((resolve, reject) => {
       const python = spawn(this.pythonPath, [scriptPath]);
@@ -719,7 +737,7 @@ export class PythonBridge {
   }
   
   async analyzeVoice(audioBuffer: Buffer): Promise<any> {
-    const scriptPath = path.join(__dirname, "ml-services", "voice_cloning_service.py");
+    const scriptPath = resolvePythonScript("voice_cloning_service.py");
     
     return new Promise((resolve, reject) => {
       const python = spawn(this.pythonPath, [scriptPath]);
