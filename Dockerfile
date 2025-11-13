@@ -35,6 +35,10 @@ COPY . .
 # Build frontend and backend
 RUN npm run build
 
+# Copy Python ML services to dist (needed for Python bridge)
+RUN mkdir -p /app/dist/ml-services && \
+    cp -r /app/server/ml-services/* /app/dist/ml-services/
+
 # Install Python build prerequisites
 COPY requirements-build.txt ./
 RUN pip install --no-cache-dir -r requirements-build.txt
